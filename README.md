@@ -75,6 +75,38 @@ arcs: (p1, t1) (t1, p2)
 Mistakes are reported with a line number, e.g.
 `error: line 3: arc (a, b) connects two places`.
 
+## Multi-agent nets (our formalism)
+
+`petrinet.agentnet` reads nets in our formalism N = ((A, {N_a}, L), M0, MF), with
+N_a = (P_a, T_a, F_a, W_a, C_a, l_a). It does not convert them to LoLA yet. See
+`examples/agents/shop.txt`:
+
+```
+index: K = 1..2                                   # index sets: a..b or {x, y}
+
+agent: Customer                                   # one block per agent type
+  places: home, queue, done
+  transitions: enter, leave, buy[k] for k in K    # 'for' repeats the line per k
+  labels: buy[k]=serve[k] for k in K              # same label = synchronised; unlisted = silent
+  arcs: (home, enter, *) (enter, queue, *)        # weight 1 (default), n, or * (variable)
+        (queue, buy[k]) (buy[k], done) for k in K
+  read: (done, leave)                             # read arcs (place, transition)
+
+initial: home=3                                   # M0
+final: home=3                                     # one 'final:' per marking in MF
+```
+
+A `for` clause repeats its whole line (several variables: `for i in I, j in J`, names like
+`q[i,j]`); items on the line that don't use the index are kept once. Inside brackets you can
+use `k`, `k+1` and `k-1`. Names are global, so overlap between agents is a parse error.
+
+```python
+from petrinet.agentnet import load
+net = load("examples/agents/shop.txt")
+net.global_transitions()       # G, with synchronised transitions merged
+net.well_formedness_errors()   # [] if well-formed (agent preservation, variable-arc pairing, ...)
+```
+
 ## Running it
 
 Run from the project root (the folder containing `petrinet/`):
