@@ -1,0 +1,8 @@
+# Producer/consumer where the consumer needs two items at a time. No dead transitions.
+places: idle ready buffer
+transitions: produce deliver consume
+initial: idle=1
+
+arcs: (idle, produce)   (produce, ready)
+      (ready, deliver)  (deliver, idle)  (deliver, buffer)
+      (buffer, consume, 2)

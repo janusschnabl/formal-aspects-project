@@ -1,0 +1,9 @@
+# Test fixture: t1/t2 move one token back and forth; t3 and t4 are dead.
+places: p1 p2 p3 p4
+transitions: t1 t2 t3 t4
+initial: p1=1
+
+arcs: (p1, t1) (t1, p2)
+      (p2, t2) (t2, p1)
+      (p3, t3) (t3, p4)
+      (p2, t4, 2) (t4, p4)

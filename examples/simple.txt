@@ -1,0 +1,11 @@
+places: p1 p2
+transitions: t1 t0
+initial: p1=0
+
+arcs: (p1, t1) (t1, p2)
+      (p1, t0 , 2) (t0, p2)
+      
+      
+      
+      #(p3, t3) (t3, p4)
+      
