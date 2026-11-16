@@ -1,23 +1,131 @@
+import json
 import os
+import shutil
 import subprocess
+import tempfile
 import unittest
 from unittest import mock
 
-from petrinet import ParseError, parse
+from petrinet import InputArc, Marking, OutputArc, ParseError, PetriNet, PetriNetError, Place, Transition, parse
 from petrinet import explore, lola
 
 HERE = os.path.dirname(__file__)
 EXAMPLE = os.path.join(HERE, "nets", "two_dead.txt")
 
 
+def load_example() -> PetriNet:
+    with open(EXAMPLE) as f:
+        return parse(f.read())
+
+
+class ElementTests(unittest.TestCase):
+    """Place, Transition, Arc and Marking each enforce their part of the definition."""
+
+    def test_same_name_same_element(self):
+        self.assertEqual(Place("p"), Place("p"))
+        self.assertEqual(len({Place("p"), Place("p")}), 1)
+        self.assertNotEqual(Place("x"), Transition("x"))  # P ∩ T = ∅
+
+    def test_arcs(self):
+        p, t = Place("p"), Transition("t")
+        self.assertEqual((InputArc(p, t).source, InputArc(p, t).target), (p, t))
+        self.assertEqual((OutputArc(t, p).source, OutputArc(t, p).target), (t, p))
+        self.assertEqual(InputArc(p, t).weight, 1)
+        self.assertNotEqual(InputArc(p, t), OutputArc(t, p))
+
+    def test_bad_elements(self):
+        p, q, t, u = Place("p"), Place("q"), Transition("t"), Transition("u")
+        cases = {
+            "empty name": lambda: Place(""),
+            "InputArc P -> P": lambda: InputArc(p, q),
+            "InputArc T -> T": lambda: InputArc(t, u),
+            "InputArc the wrong way round": lambda: InputArc(t, p),
+            "OutputArc P -> P": lambda: OutputArc(p, q),
+            "OutputArc T -> T": lambda: OutputArc(t, u),
+            "OutputArc the wrong way round": lambda: OutputArc(p, t),
+            "arc from a string": lambda: InputArc("p", t),
+            "weight 0": lambda: InputArc(p, t, 0),
+            "weight not an int": lambda: OutputArc(t, p, 1.5),
+            "negative tokens": lambda: Marking({p: -1}),
+            "tokens on a transition": lambda: Marking({t: 1}),
+        }
+        for description, make in cases.items():
+            with self.subTest(description), self.assertRaises(PetriNetError):
+                make()
+
+    def test_marking(self):
+        p, q = Place("p"), Place("q")
+        m = Marking({p: 2, q: 0})
+        self.assertEqual((m[p], m[q], m[Place("other")]), (2, 0, 0))
+        self.assertEqual(m, Marking({p: 2}))  # 0 tokens = not mentioned
+        self.assertEqual(len({m, Marking({p: 2})}), 1)
+
+
+class NetTests(unittest.TestCase):
+    def setUp(self):
+        # t needs 2 tokens in a and 1 in b, and puts 3 in c.
+        self.a, self.b, self.c = Place("a"), Place("b"), Place("c")
+        self.t = Transition("t")
+        self.net = PetriNet(
+            places={self.a, self.b, self.c},
+            transitions={self.t},
+            arcs={InputArc(self.a, self.t, 2), InputArc(self.b, self.t), OutputArc(self.t, self.c, 3)},
+        )
+
+    def test_parts(self):
+        self.assertEqual(self.net.places, {self.a, self.b, self.c})
+        self.assertEqual(self.net.transitions, {self.t})
+        self.assertEqual(len(self.net.arcs), 3)
+        self.assertEqual(self.net.initial_marking, Marking())
+
+    def test_weight_preset_postset(self):
+        self.assertEqual(self.net.weight(self.a, self.t), 2)
+        self.assertEqual(self.net.weight(self.t, self.a), 0)
+        self.assertEqual(self.net.preset(self.t), {self.a, self.b})
+        self.assertEqual(self.net.postset(self.t), {self.c})
+
+    def test_enabled_needs_all_input_places(self):
+        a, b, t = self.a, self.b, self.t
+        self.assertTrue(self.net.is_enabled(Marking({a: 2, b: 1}), t))
+        self.assertFalse(self.net.is_enabled(Marking({a: 1, b: 1}), t))
+        self.assertFalse(self.net.is_enabled(Marking({a: 2}), t))
+
+    def test_fire(self):
+        a, b, c, t = self.a, self.b, self.c, self.t
+        self.assertEqual(self.net.fire(Marking({a: 3, b: 1}), t), Marking({a: 1, c: 3}))
+
+    def test_fire_disabled(self):
+        with self.assertRaises(PetriNetError):
+            self.net.fire(Marking(), self.t)
+
+    def test_parts_must_fit_together(self):
+        p, t, x = Place("p"), Transition("t"), Place("x")
+        cases = {
+            "transition in P": lambda: PetriNet({p, t}, set(), set()),
+            "place in T": lambda: PetriNet({p}, {t, x}, set()),
+            "same name for a place and a transition": lambda: PetriNet({p}, {Transition("p")}, set()),
+            "arc to a place not in P": lambda: PetriNet({p}, {t}, {InputArc(x, t)}),
+            "arc to a transition not in T": lambda: PetriNet({p}, set(), {InputArc(p, t)}),
+            "two weights for one arc": lambda: PetriNet({p}, {t}, {InputArc(p, t, 1), InputArc(p, t, 2)}),
+            "F contains a non-arc": lambda: PetriNet({p}, {t}, {(p, t, 1)}),
+            "m_0 marks a place not in P": lambda: PetriNet({p}, {t}, set(), Marking({x: 1})),
+            "m_0 is not a Marking": lambda: PetriNet({p}, {t}, set(), {p: 1}),
+        }
+        for description, make in cases.items():
+            with self.subTest(description), self.assertRaises(PetriNetError):
+                make()
+
+
 class ParserTests(unittest.TestCase):
     def test_example(self):
-        with open(EXAMPLE) as f:
-            net = parse(f.read())
-        self.assertEqual(net.places, ["p1", "p2", "p3", "p4"])
-        self.assertEqual(net.initial, {"p1": 1})
-        t4 = net.transitions[3]
-        self.assertEqual((t4.name, t4.pre, t4.post), ("t4", {"p2": 2}, {"p4": 1}))
+        net = load_example()
+        p1, p2, p4 = Place("p1"), Place("p2"), Place("p4")
+        self.assertEqual(net.places, {p1, p2, Place("p3"), p4})
+        self.assertEqual(net.transitions, {Transition("t1"), Transition("t2"), Transition("t3"), Transition("t4")})
+        self.assertEqual(net.initial_marking, Marking({p1: 1}))
+        self.assertEqual(len(net.arcs), 8)
+        self.assertIn(InputArc(p2, Transition("t4"), 2), net.arcs)
+        self.assertIn(OutputArc(Transition("t4"), p4, 1), net.arcs)
 
     def test_multiple_inputs_weights_and_continuation_lines(self):
         net = parse(
@@ -25,9 +133,8 @@ class ParserTests(unittest.TestCase):
             "arcs: (a, t), (b,t)\n  (t, c, 3)\n"
             "arcs: (c, u)"
         )
-        t, u = net.transitions
-        self.assertEqual((t.pre, t.post), ({"a": 1, "b": 1}, {"c": 3}))
-        self.assertEqual((u.pre, u.post), ({"c": 1}, {}))
+        a, b, c, t, u = Place("a"), Place("b"), Place("c"), Transition("t"), Transition("u")
+        self.assertEqual(net.arcs, {InputArc(a, t), InputArc(b, t), OutputArc(t, c, 3), InputArc(c, u)})
 
     def test_errors(self):
         for text in [
@@ -41,10 +148,16 @@ class ParserTests(unittest.TestCase):
             "places: a\ntransitions: t\narcs: a -> t",       # not a tuple
             "places: a\ninitial: a",                         # bad marking
             "places: a\ninitial: b=1",                       # marking on non-place
+            "places: a\ninitial: a=1 a=2",                   # marking twice
             "(a, t)",                                        # no section keyword
         ]:
             with self.subTest(text=text), self.assertRaises(ParseError):
                 parse(text)
+
+    def test_error_has_line_number(self):
+        with self.assertRaises(ParseError) as ctx:
+            parse("places: a b\ntransitions: t\narcs: (a, t)\n  (a, b)")
+        self.assertEqual(ctx.exception.lineno, 4)
 
 
 class ExportTests(unittest.TestCase):
@@ -60,8 +173,7 @@ class ExportTests(unittest.TestCase):
 
 class BuiltinTests(unittest.TestCase):
     def test_example(self):
-        with open(EXAMPLE) as f:
-            self.assertEqual(explore.dead_transitions(parse(f.read())), ["t3", "t4"])
+        self.assertEqual(explore.dead_transitions(load_example()), [Transition("t3"), Transition("t4")])
 
     def test_unbounded_gives_up(self):
         net = parse("places: a\ntransitions: t u\narcs: (t, a) (a, u, 1000000) (u, a)")
@@ -70,11 +182,10 @@ class BuiltinTests(unittest.TestCase):
 
 
 class LolaDriverTests(unittest.TestCase):
-    """Drive lola.dead_transitions with a fake LoLA that answers from the builtin explorer."""
+    """Drive lola.dead_transitions with a fake LoLA that answers yes for t1 and t2."""
 
     def test_uses_ef_fireable_and_reads_result(self):
-        with open(EXAMPLE) as f:
-            net = parse(f.read())
+        net = load_example()
         live = {"t1", "t2"}
         queries = []
 
@@ -87,11 +198,10 @@ class LolaDriverTests(unittest.TestCase):
 
         with mock.patch("petrinet.lola.shutil.which", return_value="/usr/bin/lola"), \
              mock.patch("petrinet.lola.subprocess.run", side_effect=fake_run):
-            self.assertEqual(lola.dead_transitions(net), ["t3", "t4"])
+            self.assertEqual(lola.dead_transitions(net), [Transition("t3"), Transition("t4")])
         self.assertEqual(queries, [f"EF FIREABLE({t})" for t in ["t1", "t2", "t3", "t4"]])
 
     def test_json_result_preferred(self):
-        import json, tempfile
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
             json.dump({"analysis": {"result": False}}, f)
         try:
@@ -100,15 +210,14 @@ class LolaDriverTests(unittest.TestCase):
             os.unlink(f.name)
 
 
-@unittest.skipUnless(__import__("shutil").which("lola"), "lola not on PATH")
+@unittest.skipUnless(shutil.which("lola"), "lola not on PATH")
 class RealLolaTests(unittest.TestCase):
     def test_example(self):
-        with open(EXAMPLE) as f:
-            self.assertEqual(lola.dead_transitions(parse(f.read())), ["t3", "t4"])
+        self.assertEqual(lola.dead_transitions(load_example()), [Transition("t3"), Transition("t4")])
 
     def test_empty_marking_and_unbounded(self):
         net = parse("places: a b\ntransitions: src sink needb\narcs: (src, a) (a, sink) (b, needb) (needb, a)")
-        self.assertEqual(lola.dead_transitions(net), ["needb"])
+        self.assertEqual(lola.dead_transitions(net), [Transition("needb")])
 
 
 if __name__ == "__main__":

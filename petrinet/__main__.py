@@ -6,7 +6,7 @@ import argparse
 import sys
 
 from . import explore, lola
-from .net import ParseError, load
+from .parser import ParseError, load
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -41,8 +41,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if dead:
         print("Dead transitions:")
-        for name in dead:
-            print(f"  {name}")
+        for t in dead:
+            print(f"  {t.name}")
     else:
         print("No dead transitions.")
     return 0

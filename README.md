@@ -47,7 +47,8 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ## Writing a net
 
-The file follows the formal definition N = (P, T, F, W, M0):
+The file follows the formal definition N = (P, T, F, m_0), where
+F ⊆ (P × T × w) ∪ (T × P × w) and w is a positive integer:
 
 ```
 places: p1 p2 p3 p4
@@ -104,6 +105,61 @@ lola net.lola --formula="EF FIREABLE(t)" --json=result.json
 ```
 
 If LoLA answers *false*, `t` is dead.
+
+## Code structure
+
+Everything goes through one class, `PetriNet`, which is the classical net
+N = (P, T, F, m_0):
+
+```
+our formalism ──translate──▶ PetriNet ──lola.to_lola──▶ LoLA
+text file ──────parse──────▶ PetriNet ──explore───────▶ built-in check
+```
+
+| File | What it does |
+|---|---|
+| `petrinet/net.py` | `Place`, `Transition`, `InputArc`, `OutputArc`, `Marking` and `PetriNet`: the definition, W(x, y), •t, t•, enabling and firing |
+| `petrinet/parser.py` | text format → `PetriNet` |
+| `petrinet/lola.py` | `PetriNet` → LoLA syntax, and running LoLA |
+| `petrinet/explore.py` | built-in reachability search |
+
+## Building a net in Python
+
+Each part of N = (P, T, F, m_0) has its own class, and each class enforces
+its part of the definition:
+
+| Definition | Class | Enforces |
+|---|---|---|
+| p ∈ P | `Place(name)` | `Place` and `Transition` are different types, so P ∩ T = ∅ |
+| t ∈ T | `Transition(name)` | |
+| (p, t, w) ∈ P × T × w | `InputArc(place, transition, weight=1)` | the first end is a place, the second a transition, w ≥ 1 |
+| (t, p, w) ∈ T × P × w | `OutputArc(transition, place, weight=1)` | the first end is a transition, the second a place, w ≥ 1 |
+| m : P → ℕ | `Marking({place: tokens})` | token counts are natural numbers; unlisted places have 0 |
+| N | `PetriNet(P, T, F, m_0)` | arcs only use places in P and transitions in T, at most one arc per (x, y), m_0 only marks places in P |
+
+A translation from another formalism builds the four sets and hands them over:
+
+```python
+from petrinet import InputArc, Marking, OutputArc, PetriNet, Place, Transition
+from petrinet.lola import dead_transitions, to_lola
+
+idle, busy = Place("idle"), Place("busy")
+start = Transition("start")
+
+net = PetriNet(
+    places={idle, busy},                                    # P
+    transitions={start},                                    # T
+    arcs={InputArc(idle, start), OutputArc(start, busy, weight=2)},    # F
+    initial_marking=Marking({idle: 1}),                     # m_0
+)
+
+print(to_lola(net))
+print(dead_transitions(net))
+```
+
+The semantics are methods on the net: `net.weight(x, y)` is W(x, y),
+`net.preset(t)` / `net.postset(t)` are •t / t•, and `net.is_enabled(m, t)`
+and `net.fire(m, t)` follow the firing rule. Firing returns a new `Marking`.
 
 ## Tests
 

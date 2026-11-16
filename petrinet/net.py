@@ -1,142 +1,332 @@
-"""Petri net data model and the plain-text format parser.
+"""The classical place/transition Petri net, as defined in the course.
 
-The format follows the formal definition N = (P, T, F, M0):
+    N = (P, T, F, m_0)
 
-    places: p1 p2 p3                  # P
-    transitions: t1 t2                # T
-    initial: p1=1 p3=2                # M0, unlisted places are 0
-    arcs: (p1, t1) (t1, p2)           # F, each arc is (place, transition)
-          (p2, t2, 2) (t2, p3)        #    or (transition, place); optional 3rd
-                                      #    element is the arc weight (default 1)
+    P                               a finite set of places          -> set of Place
+    T                               a finite set of transitions     -> set of Transition
+    F ⊆ (P × T × w) ∪ (T × P × w)   the weighted arcs, w ∈ ℤ⁺       -> set of InputArc
+                                                                       and OutputArc
+    m_0 : P → ℕ                     the initial marking             -> Marking
 
-`#` starts a comment. Each keyword may be repeated; a line that does not
-start with a keyword continues the previous one. Names may contain
-letters, digits and underscores.
+Each class enforces its own part of the definition:
+
+    Place, Transition   different types, so P ∩ T = ∅ automatically
+    InputArc            (p, t, w) ∈ P × T × w, with w ≥ 1
+    OutputArc           (t, p, w) ∈ T × P × w, with w ≥ 1
+    Marking             maps places to natural numbers (unlisted places have 0)
+    PetriNet            checks that the four parts fit together: every arc
+                        uses places in P and transitions in T, there is at most
+                        one arc per (x, y), and m_0 only marks places in P
+
+We write
+
+    W(x, y) = w   if (x, y, w) ∈ F,   and 0 otherwise
+    •t = {p ∈ P | W(p, t) > 0}        (preset of t)
+    t• = {p ∈ P | W(t, p) > 0}        (postset of t)
+
+Execution semantics, for a marking m:
+
+    t is enabled in m    iff   m(p) ≥ W(p, t) for every p ∈ •t
+    firing t in m gives  m'    with  m'(p) = m(p) - W(p, t) + W(t, p)
+
+Example:
+
+    p1, p2 = Place("p1"), Place("p2")
+    t = Transition("t")
+    net = PetriNet(
+        places={p1, p2},
+        transitions={t},
+        arcs={InputArc(p1, t), OutputArc(t, p2, weight=2)},
+        initial_marking=Marking({p1: 1}),
+    )
 """
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass, field
-
-NAME = r"[A-Za-z_][A-Za-z0-9_]*"
-NAME_RE = re.compile(NAME)
-KEYWORD_RE = re.compile(r"^(places|transitions|initial|arcs)\s*:(.*)$")
-ARC_RE = re.compile(rf"\(\s*({NAME})\s*,\s*({NAME})\s*(?:,\s*(\d+)\s*)?\)")
-MARKING_RE = re.compile(rf"({NAME})\s*=\s*(\d+)")
+from dataclasses import dataclass
 
 
-class ParseError(ValueError):
-    def __init__(self, lineno: int, msg: str):
-        super().__init__(f"line {lineno}: {msg}" if lineno else msg)
-        self.lineno = lineno
+class PetriNetError(ValueError):
+    """Raised when something would break the definition of a Petri net."""
 
 
-@dataclass
-class Transition:
+def _is_natural_number(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _check_name(name: object, kind: str) -> None:
+    if not isinstance(name, str) or not name:
+        raise PetriNetError(f"a {kind} needs a non-empty name, got {name!r}")
+
+
+# --- P and T ------------------------------------------------------------
+
+
+@dataclass(frozen=True, order=True)
+class Place:
+    """An element of P. Two places are the same place iff they have the same name."""
+
     name: str
-    pre: dict[str, int] = field(default_factory=dict)   # place -> weight consumed
-    post: dict[str, int] = field(default_factory=dict)  # place -> weight produced
+
+    def __post_init__(self) -> None:
+        _check_name(self.name, "place")
+
+    def __str__(self) -> str:
+        return self.name
 
 
-@dataclass
+@dataclass(frozen=True, order=True)
+class Transition:
+    """An element of T. Two transitions are the same iff they have the same name."""
+
+    name: str
+
+    def __post_init__(self) -> None:
+        _check_name(self.name, "transition")
+
+    def __str__(self) -> str:
+        return self.name
+
+
+# --- F --------------------------------------------------------------------
+#
+# F ⊆ (P × T × w) ∪ (T × P × w) is a union of two kinds of triple, so there is
+# one class for each kind. The field types say which side is the place and
+# which is the transition, so an arc P -> P or T -> T cannot be written down.
+
+
+@dataclass(frozen=True)
+class InputArc:
+    """(p, t, w) ∈ P × T × w: transition t takes w tokens from place p."""
+
+    place: Place
+    transition: Transition
+    weight: int = 1
+
+    def __post_init__(self) -> None:
+        _check_arc(self.place, self.transition, self.weight, str(self))
+
+    @property
+    def source(self) -> Place:
+        return self.place
+
+    @property
+    def target(self) -> Transition:
+        return self.transition
+
+    def __str__(self) -> str:
+        return f"({self.place}, {self.transition}, {self.weight})"
+
+
+@dataclass(frozen=True)
+class OutputArc:
+    """(t, p, w) ∈ T × P × w: transition t puts w tokens in place p."""
+
+    transition: Transition
+    place: Place
+    weight: int = 1
+
+    def __post_init__(self) -> None:
+        _check_arc(self.place, self.transition, self.weight, str(self))
+
+    @property
+    def source(self) -> Transition:
+        return self.transition
+
+    @property
+    def target(self) -> Place:
+        return self.place
+
+    def __str__(self) -> str:
+        return f"({self.transition}, {self.place}, {self.weight})"
+
+
+# An element of F.
+Arc = InputArc | OutputArc
+
+
+def _check_arc(place: object, transition: object, weight: object, arc: str) -> None:
+    """Python does not check type hints when the program runs, so check them here."""
+    if not isinstance(place, Place):
+        raise PetriNetError(f"arc {arc}: {place!r} must be a Place")
+    if not isinstance(transition, Transition):
+        raise PetriNetError(f"arc {arc}: {transition!r} must be a Transition")
+    if not _is_natural_number(weight) or weight == 0:
+        raise PetriNetError(f"arc {arc}: weight must be a positive integer")
+
+
+# --- markings -------------------------------------------------------------
+
+
+class Marking:
+    """A marking m : P → ℕ. Places that are not mentioned have 0 tokens.
+
+    A Marking never changes after it is made (firing gives a new one), so
+    markings can be compared with == and put in sets.
+    """
+
+    def __init__(self, tokens: dict[Place, int] | None = None) -> None:
+        self._tokens: dict[Place, int] = {}  # only places with at least one token
+        if tokens is None:
+            return
+        for place, count in tokens.items():
+            if not isinstance(place, Place):
+                raise PetriNetError(f"a marking gives tokens to places, but {place!r} is not a Place")
+            if not _is_natural_number(count):
+                raise PetriNetError(f"m({place}) must be a natural number, got {count!r}")
+            if count > 0:
+                self._tokens[place] = count
+
+    def __getitem__(self, place: Place) -> int:
+        """m(place)"""
+        return self._tokens.get(place, 0)
+
+    def marked_places(self) -> set[Place]:
+        """The places with at least one token."""
+        return set(self._tokens)
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, Marking) and self._tokens == other._tokens
+
+    def __hash__(self) -> int:
+        return hash(frozenset(self._tokens.items()))
+
+    def __repr__(self) -> str:
+        parts = []
+        for place in sorted(self._tokens):
+            parts.append(f"{place}: {self._tokens[place]}")
+        return "Marking({" + ", ".join(parts) + "})"
+
+
+# --- the net --------------------------------------------------------------
+
+
 class PetriNet:
-    places: list[str] = field(default_factory=list)
-    initial: dict[str, int] = field(default_factory=dict)
-    transitions: list[Transition] = field(default_factory=list)
+    """N = (P, T, F, m_0). The constructor checks that the four parts fit together."""
 
-    def initial_marking(self) -> tuple[int, ...]:
-        return tuple(self.initial.get(p, 0) for p in self.places)
+    def __init__(
+        self,
+        places: set[Place],
+        transitions: set[Transition],
+        arcs: set[Arc],
+        initial_marking: Marking | None = None,
+    ) -> None:
+        self._places = frozenset(places)
+        self._transitions = frozenset(transitions)
+        self._arcs = frozenset(arcs)
+        if initial_marking is None:
+            initial_marking = Marking()
+        self._initial_marking = initial_marking
 
+        self._check_places_and_transitions()
+        self._check_arcs()
+        self._check_initial_marking()
 
-def _scan(body: str, pattern: re.Pattern, lineno: int, what: str) -> list[re.Match]:
-    """Match `pattern` repeatedly over body, allowing only whitespace/commas between matches."""
-    matches, pos = [], 0
-    for m in pattern.finditer(body):
-        if body[pos:m.start()].strip(" \t,"):
-            break
-        matches.append(m)
-        pos = m.end()
-    rest = body[pos:].strip(" \t,")
-    if rest:
-        raise ParseError(lineno, f"bad {what} near {rest!r}")
-    return matches
+        # W, so that weight(x, y) does not have to search F every time.
+        self._weights: dict[tuple[Place | Transition, Place | Transition], int] = {}
+        for arc in self._arcs:
+            self._weights[(arc.source, arc.target)] = arc.weight
 
+    @property
+    def places(self) -> frozenset[Place]:
+        return self._places
 
-def parse(text: str) -> PetriNet:
-    places: list[tuple[int, str]] = []
-    transitions: list[tuple[int, str]] = []
-    initial: list[tuple[int, str, int]] = []
-    arcs: list[tuple[int, str, str, int]] = []
+    @property
+    def transitions(self) -> frozenset[Transition]:
+        return self._transitions
 
-    section = None
-    for lineno, raw in enumerate(text.splitlines(), start=1):
-        line = raw.split("#", 1)[0].strip()
-        if not line:
-            continue
-        m = KEYWORD_RE.match(line)
-        if m:
-            section, body = m.group(1), m.group(2)
-        elif section is None:
-            raise ParseError(lineno, f"expected 'places:', 'transitions:', 'initial:' or 'arcs:', got {line!r}")
-        else:
-            body = line
+    @property
+    def arcs(self) -> frozenset[Arc]:
+        return self._arcs
 
-        if section in ("places", "transitions"):
-            target = places if section == "places" else transitions
-            for name in re.split(r"[,\s]+", body.strip()):
-                if not name:
-                    continue
-                if not NAME_RE.fullmatch(name):
-                    raise ParseError(lineno, f"bad name {name!r}")
-                target.append((lineno, name))
-        elif section == "initial":
-            for mm in _scan(body, MARKING_RE, lineno, "marking (expected place=N)"):
-                initial.append((lineno, mm.group(1), int(mm.group(2))))
-        else:
-            for mm in _scan(body, ARC_RE, lineno, "arc (expected (x, y) or (x, y, weight))"):
-                arcs.append((lineno, mm.group(1), mm.group(2), int(mm.group(3) or 1)))
+    @property
+    def initial_marking(self) -> Marking:
+        return self._initial_marking
 
-    # --- semantic checks -------------------------------------------------
-    net = PetriNet()
-    seen: dict[str, str] = {}
-    for kind, items in (("place", places), ("transition", transitions)):
-        for lineno, name in items:
-            if name in seen:
-                raise ParseError(lineno, f"{name!r} already declared as a {seen[name]}")
-            seen[name] = kind
-    net.places = [n for _, n in places]
-    trans = {n: Transition(n) for _, n in transitions}
-    net.transitions = list(trans.values())
+    def _check_places_and_transitions(self) -> None:
+        names_seen: set[str] = set()
+        for place in self._places:
+            if not isinstance(place, Place):
+                raise PetriNetError(f"P may only contain places, but contains {place!r}")
+            names_seen.add(place.name)
+        for transition in self._transitions:
+            if not isinstance(transition, Transition):
+                raise PetriNetError(f"T may only contain transitions, but contains {transition!r}")
+            # Place("a") and Transition("a") are different, but the same name
+            # for both would make the net ambiguous to read (and to LoLA).
+            if transition.name in names_seen:
+                raise PetriNetError(f"{transition.name!r} is the name of both a place and a transition")
 
-    for lineno, p, n in initial:
-        if seen.get(p) != "place":
-            raise ParseError(lineno, f"initial marking: {p!r} is not a declared place")
-        if p in net.initial:
-            raise ParseError(lineno, f"initial marking for {p!r} given twice")
-        net.initial[p] = n
+    def _check_arcs(self) -> None:
+        pairs_seen: set[tuple[Place | Transition, Place | Transition]] = set()
+        for arc in self._arcs:
+            if not isinstance(arc, (InputArc, OutputArc)):
+                raise PetriNetError(f"F may only contain arcs, but contains {arc!r}")
+            if arc.place not in self._places:
+                raise PetriNetError(f"arc {arc}: {arc.place} is not in P")
+            if arc.transition not in self._transitions:
+                raise PetriNetError(f"arc {arc}: {arc.transition} is not in T")
+            pair = (arc.source, arc.target)
+            if pair in pairs_seen:
+                raise PetriNetError(f"F has more than one arc from {arc.source} to {arc.target}")
+            pairs_seen.add(pair)
 
-    for lineno, src, dst, w in arcs:
-        arc = f"({src}, {dst})"
-        for name in (src, dst):
-            if name not in seen:
-                raise ParseError(lineno, f"arc {arc}: {name!r} is not a declared place or transition")
-        if w == 0:
-            raise ParseError(lineno, f"arc {arc}: weight must be positive")
-        kinds = (seen[src], seen[dst])
-        if kinds == ("place", "transition"):
-            side, t, p = trans[dst].pre, dst, src
-        elif kinds == ("transition", "place"):
-            side, t, p = trans[src].post, src, dst
-        else:
-            raise ParseError(lineno, f"arc {arc} connects two {kinds[0]}s; arcs must go place->transition or transition->place")
-        if p in side:
-            raise ParseError(lineno, f"arc {arc} given twice")
-        side[p] = w
+    def _check_initial_marking(self) -> None:
+        if not isinstance(self._initial_marking, Marking):
+            raise PetriNetError(f"m_0 must be a Marking, got {self._initial_marking!r}")
+        for place in self._initial_marking.marked_places():
+            if place not in self._places:
+                raise PetriNetError(f"m_0 gives tokens to {place}, which is not in P")
 
-    return net
+    def _check_transition(self, transition: Transition) -> None:
+        if transition not in self._transitions:
+            raise PetriNetError(f"{transition!r} is not in T")
 
+    # --- W, presets and postsets -----------------------------------------
 
-def load(path: str) -> PetriNet:
-    with open(path, encoding="utf-8") as f:
-        return parse(f.read())
+    def weight(self, source: Place | Transition, target: Place | Transition) -> int:
+        """W(source, target): the weight of the arc, or 0 if there is none."""
+        return self._weights.get((source, target), 0)
+
+    def preset(self, transition: Transition) -> set[Place]:
+        """•t: the places with an arc into the transition."""
+        self._check_transition(transition)
+        result: set[Place] = set()
+        for arc in self._arcs:
+            if isinstance(arc, InputArc) and arc.transition == transition:
+                result.add(arc.place)
+        return result
+
+    def postset(self, transition: Transition) -> set[Place]:
+        """t•: the places with an arc out of the transition."""
+        self._check_transition(transition)
+        result: set[Place] = set()
+        for arc in self._arcs:
+            if isinstance(arc, OutputArc) and arc.transition == transition:
+                result.add(arc.place)
+        return result
+
+    # --- execution semantics ---------------------------------------------
+
+    def is_enabled(self, marking: Marking, transition: Transition) -> bool:
+        """m(p) >= W(p, t) for every p in •t."""
+        for place in self.preset(transition):
+            if marking[place] < self.weight(place, transition):
+                return False
+        return True
+
+    def enabled_transitions(self, marking: Marking) -> set[Transition]:
+        result: set[Transition] = set()
+        for transition in self._transitions:
+            if self.is_enabled(marking, transition):
+                result.add(transition)
+        return result
+
+    def fire(self, marking: Marking, transition: Transition) -> Marking:
+        """m'(p) = m(p) - W(p, t) + W(t, p). The transition must be enabled."""
+        if not self.is_enabled(marking, transition):
+            raise PetriNetError(f"transition {transition} is not enabled in {marking!r}")
+        new_tokens: dict[Place, int] = {}
+        for place in self._places:
+            new_tokens[place] = marking[place] - self.weight(place, transition) + self.weight(transition, place)
+        return Marking(new_tokens)

@@ -14,7 +14,7 @@ import shutil
 import subprocess
 import tempfile
 
-from .net import PetriNet
+from .net import PetriNet, Transition
 
 
 class LolaError(RuntimeError):
@@ -22,19 +22,46 @@ class LolaError(RuntimeError):
 
 
 def to_lola(net: PetriNet) -> str:
-    def arcs(d: dict[str, int]) -> str:
-        return ", ".join(f"{p}: {w}" for p, w in d.items())
+    """Write the net in LoLA's syntax. Each part of N = (P, T, F, m_0) maps directly:
 
-    lines = [f"PLACE {', '.join(net.places)};", ""]
-    marking = [f"{p}: {n}" for p, n in net.initial.items() if n > 0]
-    lines += [f"MARKING {', '.join(marking)};", ""]
-    for t in net.transitions:
-        lines += [
-            f"TRANSITION {t.name}",
-            f"  CONSUME {arcs(t.pre)};",
-            f"  PRODUCE {arcs(t.post)};",
-            "",
-        ]
+        PLACE p1, p2;                 P
+        MARKING p1: 1;                m_0 (places with 0 tokens are left out)
+        TRANSITION t                  t ∈ T
+          CONSUME p1: 1;              W(p, t) for p ∈ •t
+          PRODUCE p2: 2;              W(t, p) for p ∈ t•
+
+    P and T are sets, so they are written sorted by name to get the same file every time.
+    """
+    places = sorted(net.places)
+
+    place_names = []
+    for place in places:
+        place_names.append(place.name)
+
+    marked = []
+    for place in places:
+        tokens = net.initial_marking[place]
+        if tokens > 0:
+            marked.append(f"{place.name}: {tokens}")
+
+    lines = []
+    lines.append(f"PLACE {', '.join(place_names)};")
+    lines.append("")
+    lines.append(f"MARKING {', '.join(marked)};")
+    lines.append("")
+
+    for t in sorted(net.transitions):
+        consume = []
+        for place in sorted(net.preset(t)):
+            consume.append(f"{place.name}: {net.weight(place, t)}")
+        produce = []
+        for place in sorted(net.postset(t)):
+            produce.append(f"{place.name}: {net.weight(t, place)}")
+
+        lines.append(f"TRANSITION {t.name}")
+        lines.append(f"  CONSUME {', '.join(consume)};")
+        lines.append(f"  PRODUCE {', '.join(produce)};")
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -68,15 +95,15 @@ def check_formula(lola_file: str, formula: str, lola_bin: str = "lola", timeout:
         return _parse_result(proc.stdout, proc.stderr, json_path)
 
 
-def dead_transitions(net: PetriNet, lola_bin: str = "lola", timeout: float | None = None) -> list[str]:
+def dead_transitions(net: PetriNet, lola_bin: str = "lola", timeout: float | None = None) -> list[Transition]:
     if shutil.which(lola_bin) is None and not os.path.isfile(lola_bin):
         raise LolaError(f"LoLA executable {lola_bin!r} not found on PATH")
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "net.lola")
         with open(path, "w", encoding="utf-8") as f:
             f.write(to_lola(net))
-        return [
-            t.name
-            for t in net.transitions
-            if not check_formula(path, f"EF FIREABLE({t.name})", lola_bin, timeout)
-        ]
+        dead = []
+        for t in sorted(net.transitions):
+            if not check_formula(path, f"EF FIREABLE({t.name})", lola_bin, timeout):
+                dead.append(t)
+        return dead
