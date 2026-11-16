@@ -1,0 +1,16 @@
+agent: Janus
+places: hjem1, uni1
+transitions: dukOp1
+labels: dukOp1=dukOp
+
+arcs: (hjem1, dukOp1) (dukOp1, uni1)
+
+agent: Thomas
+places: hjem2, uni2
+transitions: dukOp2
+labels: dukOp2=dukOp
+
+arcs: (hjem2, dukOp2) (dukOp2, uni2)
+
+initial: hjem1=1, hjem2=1
+final: uni1=1, uni2=1

@@ -1,0 +1,27 @@
+# Customers are served by clerks at two counters.
+#   - any number of customers can enter together (variable arcs)
+#   - buying at counter k synchronises a customer with the clerk at counter k
+#     (shared label serve[k]); the clerk only reads its 'open' place, so it is
+#     not consumed
+#   - clerks can take a break; while away, their counter cannot serve
+
+index: K = 1..2
+
+agent: Customer
+  places: home, queue, done
+  transitions: enter, leave, buy[k] for k in K
+  labels: buy[k]=serve[k] for k in K
+  arcs: (home, enter, *) (enter, queue, *)
+        (queue, buy[k]) (buy[k], done) for k in K
+        (done, leave, *) (leave, home, *)
+
+agent: Clerk
+  places: open[k], away[k] for k in K
+  transitions: sell[k], pause[k], resume[k] for k in K
+  labels: sell[k]=serve[k] for k in K
+  read: (open[k], sell[k]) for k in K
+  arcs: (open[k], pause[k]) (pause[k], away[k]) for k in K
+        (away[k], resume[k]) (resume[k], open[k]) for k in K
+
+initial: home=3, open[k]=1 for k in K
+final: home=3, open[k]=1 for k in K
