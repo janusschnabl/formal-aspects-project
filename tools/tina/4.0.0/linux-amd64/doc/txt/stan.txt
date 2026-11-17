@@ -1,0 +1,142 @@
+4mstan24m(n)                                                                4mstan24m(n)
+
+1mNAME0m
+       stan - Siphons Traps Analysis tool
+
+       Part of Tina Toolbox for analysis of Petri nets and Time Petri nets.
+
+
+1mSYNOPSIS0m
+       1mstan 22m[-4mh24melp]
+              [-S | -T] [-strict]
+              [-native | -4ti2] [-32 | -64 | -mp | -dp]
+              [-v | -q | -stats]
+              [-NET | -NDR | -PNML | -TPN | -TTS]
+              [infile] [outfile] [errorfile]
+
+
+
+1mDESCRIPTION0m
+       stan  computes   generator sets for  siphons or traps of nets using the
+       method of Ezpeleta/Couvreur/Silva in Petri Nets 1991.  It takes  as in-
+       put descriptions of a Petri  net   in   textual   form  (.net,   .pnml,
+       .tpn   formats)   or  graphical  form (.ndr  format  of  files produced
+       by  nd, .pnml  with graphics), or a Time Transition System  description
+       in .tts format.
+
+
+
+1mOPTIONS0m
+       -4mh24melp  Recalls options.
+
+
+       1mOperating mode options:0m
+
+
+       -S | -T
+              Computes siphons (-S) or traps (-T).
+
+
+       -strict
+              Computes strict siphons or traps, in addition.
+
+
+       -native
+              Use the native solver for computation of flows or semiflows (de-
+              fault).
+
+
+       -4ti2  Use  the 4ti2 solver (www.4ti2.de) rather than the native imple-
+              mentations for computation of siphons or traps.  This option re-
+              quires to compile and install the 4ti2 toolset on your  machine.
+              4ti2 is significantly faster on large nets.
+
+
+       -32 | -64 | -mp | -dp
+              precision of arithmetic computations:
+              -32: use 32 bit integers;
+              -64: use 64 bit integers;
+              -mp: use arbitrary precision arithmetics;
+              -dp: use default precision.
+
+
+       1mOutput format selection :0m
+
+
+       -v     textual output, prints full results.
+
+
+       -q     textual  output,  counts  numbers of siphons or traps and prints
+              them.
+
+
+       1mInput format flags:0m
+
+
+       -NET | -NDR | -PNML | -TPN | -TTS
+              Specifies the format of the input net. This  flag  is  necessary
+              when  the  input  net  is read on standard input, or read from a
+              file that does not bear the expected extension. By default,  the
+              net is assumed in .net or .ndr format.
+
+
+       1mInput source:0m
+
+
+       infile Where  the   net  is   read. The  input format is  determined by
+              the file type, according to the table below. If absent or speci-
+              fied by "-", the net is  read on standard  input in the   format
+              specified  by  the input flag. If  both an  infile and  some in-
+              put flag  are present,  then the format defined  by  the   input
+              flag supersedes  that determined  by the infile extension.
+
+              file extension      input format
+              --------------------------------------------------------------
+              .net           net format
+              .ndr           ndr format
+              .tpn           tpn format
+              .pnml               pnml format
+              .tts           tts format
+
+
+       1mOutput destination:0m
+
+
+       outfile
+              Where  results are  written.   If  absent or  specified  by "-",
+              then results are written on standard output.
+
+
+
+       1mErrors destination:0m
+
+
+       errorfile
+              Where error messages are written. By default, errors are printed
+              on standard error.
+
+
+
+       1mDefault options are :0m
+
+              stan -v -S
+
+
+
+1mEXAMPLES0m
+       stan nets/ifip.ndr
+       stan -T -q nets/ifip.ndr
+
+
+
+1mSEE ALSO0m
+       nd(n), tina(n), plan(n), ktzio(n), ndrio(n), tedd(n), selt(n), sift(n),
+       muse(n),  pathto(n),  scan(n),  struct(n), play(n), walk(n), reduce(n),
+       formats(n)
+
+
+1mAUTHORS0m
+       Bernard Berthomieu, LAAS/CNRS, 2000-2026, Bernard.Berthomieu@laas.fr.
+
+
+Tina Tools                       Version 4.0.0                         4mstan24m(n)

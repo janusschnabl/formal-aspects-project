@@ -1,13 +1,8 @@
-import json
 import os
-import shutil
-import subprocess
-import tempfile
 import unittest
-from unittest import mock
 
 from petrinet import InputArc, Marking, OutputArc, ParseError, PetriNet, PetriNetError, Place, Transition, parse
-from petrinet import explore, lola
+from petrinet import explore, tina
 
 HERE = os.path.dirname(__file__)
 EXAMPLE = os.path.join(HERE, "nets", "two_dead.txt")
@@ -179,28 +174,22 @@ class ParserTests(unittest.TestCase):
 
 
 class ExportTests(unittest.TestCase):
-    def test_invalid_lola_names_are_rejected_without_aliases(self):
-        for name in ["p[1,a]", "p q", "p;q", "p:q", "p(q)", "p{q}",
-                     "PLACE", "FIREABLE", "AG", "oo", "1", "-2", "+", "/*"]:
-            with self.subTest(name=name), self.assertRaises(lola.LolaError):
-                lola.to_lola(PetriNet({Place(name)}, {Transition("t")}, set()))
+    def test_export_preserves_indexed_and_quoted_names(self):
         net = PetriNet({Place("p.a[1][-2]")}, {Transition("step.done")}, set())
-        self.assertIn("PLACE p.a[1][-2];", lola.to_lola(net))
-        self.assertIn("TRANSITION step.done", lola.to_lola(net))
+        self.assertIn("pl {p.a[1][-2]} (0)", tina.to_tina(net))
+        self.assertIn("tr {step.done}", tina.to_tina(net))
 
-    def test_empty_nets_remain_valid_but_cannot_be_exported_to_lola(self):
-        for net in [PetriNet(set(), set(), set()), PetriNet({Place("p")}, set(), set())]:
-            with self.subTest(net=net), self.assertRaises(lola.LolaError):
-                lola.to_lola(net)
+    def test_empty_nets_can_be_exported(self):
+        self.assertEqual(tina.to_tina(PetriNet(set(), set(), set())), "\n")
+        self.assertEqual(tina.to_tina(PetriNet({Place("p")}, set(), set())), "pl {p} (0)\n")
 
-    def test_to_lola(self):
+    def test_markings_weights_and_source_transitions_are_exported(self):
         net = parse("places: a b\ntransitions: t u\ninitial: a=2\narcs: (a, t, 2) (t, b) (u, a)")
-        self.assertEqual(
-            lola.to_lola(net),
-            "PLACE a, b;\n\nMARKING a: 2;\n\n"
-            "TRANSITION t\n  CONSUME a: 2;\n  PRODUCE b: 1;\n\n"
-            "TRANSITION u\n  CONSUME ;\n  PRODUCE a: 1;\n",
-        )
+        exported = tina.to_tina(net)
+        self.assertIn("pl {a} (2)", exported)
+        self.assertIn("pl {b} (0)", exported)
+        self.assertIn("tr {t} {a}*2 -> {b}*1", exported)
+        self.assertIn("tr {u}  -> {a}*1", exported)
 
 
 class BuiltinTests(unittest.TestCase):
@@ -211,45 +200,6 @@ class BuiltinTests(unittest.TestCase):
         net = parse("places: a\ntransitions: t u\narcs: (t, a) (a, u, 1000000) (u, a)")
         with self.assertRaises(explore.StateSpaceTooLarge):
             explore.dead_transitions(net, limit=100)
-
-
-class LolaDriverTests(unittest.TestCase):
-    """Drive lola.dead_transitions with a fake LoLA that answers yes for t1 and t2."""
-
-    def test_uses_ef_fireable_and_reads_result(self):
-        net = load_example()
-        live = {"t1", "t2"}
-        queries = []
-
-        def fake_run(cmd, **kw):
-            formula = cmd[2].removeprefix("--formula=")
-            queries.append(formula)
-            name = formula.removeprefix("EF FIREABLE(").removesuffix(")")
-            verdict = "yes" if name in live else "no"
-            return subprocess.CompletedProcess(cmd, 0, "", f"lola: result: {verdict}\n")
-
-        with mock.patch("petrinet.lola.shutil.which", return_value="/usr/bin/lola"), \
-             mock.patch("petrinet.lola.subprocess.run", side_effect=fake_run):
-            self.assertEqual(lola.dead_transitions(net), [Transition("t3"), Transition("t4")])
-        self.assertEqual(queries, [f"EF FIREABLE({t})" for t in ["t1", "t2", "t3", "t4"]])
-
-    def test_json_result_preferred(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
-            json.dump({"analysis": {"result": False}}, f)
-        try:
-            self.assertFalse(lola._parse_result("", "lola: result: yes", f.name))
-        finally:
-            os.unlink(f.name)
-
-
-@unittest.skipUnless(shutil.which("lola"), "lola not on PATH")
-class RealLolaTests(unittest.TestCase):
-    def test_example(self):
-        self.assertEqual(lola.dead_transitions(load_example()), [Transition("t3"), Transition("t4")])
-
-    def test_empty_marking_and_unbounded(self):
-        net = parse("places: a b\ntransitions: src sink needb\narcs: (src, a) (a, sink) (b, needb) (needb, a)")
-        self.assertEqual(lola.dead_transitions(net), [Transition("needb")])
 
 
 if __name__ == "__main__":

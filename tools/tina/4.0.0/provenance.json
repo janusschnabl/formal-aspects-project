@@ -1,0 +1,13 @@
+{
+  "version": "4.0.0",
+  "platforms": {
+    "windows-amd64": {
+      "url": "https://projects.laas.fr/tina/binaries/tina-4.0.0-amd64-mswin.zip",
+      "archive_sha256": "b7406e27eb5b31a9efdfa976f90d7d516634bfa04d59d02785034e75800a2aa2"
+    },
+    "linux-amd64": {
+      "url": "https://projects.laas.fr/tina/binaries/tina-4.0.0-amd64-linux.tgz",
+      "archive_sha256": "5e1cbd7c2e043419037a3d265914042fde795563094f38ddd88b42444d4afa8c"
+    }
+  }
+}

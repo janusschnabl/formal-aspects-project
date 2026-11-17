@@ -96,14 +96,12 @@ class IndexTests(unittest.TestCase):
         with self.assertRaisesRegex(ParseError, "missing a 'for"):
             parse("agent: A\n places: p[1][a]\n initial: p[1][j]=1")
 
-    def test_lola_reserved_names_fail_at_declaration_line(self):
-        # Agent type A is valid: only the names exported to LoLA are checked.
+    def test_checker_keywords_are_valid_names(self):
         for name in ["PLACE", "FIREABLE", "TRUE", "oo", "A", "AG", "AGEF", "XX"]:
             for statement in [f"places: {name}", f"transitions: {name}", f"labels: t={name}"]:
-                with self.subTest(name=name, statement=statement), self.assertRaises(ParseError) as cm:
-                    parse("agent: A\n transitions: t\n" + statement)
-                self.assertEqual(cm.exception.lineno, 3)
-                self.assertIn("reserved", str(cm.exception))
+                with self.subTest(name=name, statement=statement):
+                    net = parse("agent: A\n transitions: t\n" + statement)
+                    self.assertIn("A", net.agents)
         self.assertEqual(parse("agent: A\n places: AG[1] place\n").places, ["AG[1]", "place"])
 
 

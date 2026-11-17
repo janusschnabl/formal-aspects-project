@@ -272,7 +272,7 @@ class PetriNet:
             if not isinstance(transition, Transition):
                 raise PetriNetError(f"T may only contain transitions, but contains {transition!r}")
             # Place("a") and Transition("a") are different, but the same name
-            # for both would make the net ambiguous to read (and to LoLA).
+            # for both would make the net ambiguous to read and export.
             if transition.name in names_seen:
                 raise PetriNetError(f"{transition.name!r} is the name of both a place and a transition")
 

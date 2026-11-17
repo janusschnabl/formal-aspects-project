@@ -1,4 +1,4 @@
-"""Built-in explicit-state reachability, used to cross-check LoLA.
+"""Independent explicit-state reachability, used to cross-check Tina in tests.
 
 Explores every marking reachable from m_0 (breadth first). A transition is
 dead if it is enabled in none of them. Only works for bounded nets (finite

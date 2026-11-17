@@ -1,0 +1,145 @@
+.TH stan n "Version 4.0.0" "Tina Tools"
+
+.SH NAME
+stan \- Siphons Traps Analysis tool
+
+Part of Tina Toolbox for analysis of Petri nets and Time Petri nets.
+
+.SH SYNOPSIS
+
+.B stan
+[\-\f2h\f1elp]
+       [\-S | \-T] [\-strict]
+       [\-native | \-4ti2] [\-32 | \-64 | \-mp | \-dp]
+       [\-v | \-q | \-stats]
+       [\-NET | \-NDR | \-PNML | \-TPN | \-TTS]
+       [infile] [outfile] [errorfile]
+
+
+.SH DESCRIPTION
+
+stan computes  generator sets for  siphons or traps of nets using the method
+of Ezpeleta/Couvreur/Silva in Petri Nets 1991.
+It takes  as input descriptions of a Petri  net  in  textual  form (\&.net,  \&.pnml,  \&.tpn  formats)  or
+graphical  form (\&.ndr  format  of  files produced  by  nd, .\&pnml  with
+graphics), or a Time Transition System description in \&.tts format.
+
+
+.SH OPTIONS
+
+.TP
+\-\f2h\f1elp
+Recalls options.
+
+.TP
+.B Operating mode options:
+
+.TP
+\-S | -T
+Computes siphons (-S) or traps (-T).
+
+.TP
+\-strict
+Computes strict siphons or traps, in addition.
+
+.TP
+\-native
+Use the native solver for computation of flows or semiflows (default).
+
+.TP
+\-4ti2
+Use the 4ti2 solver (www.4ti2.de) rather than the native implementations for
+computation of siphons or traps.  This option requires to compile and install
+the 4ti2 toolset on your machine. 4ti2 is significantly faster on large nets.
+
+.TP
+\-32 | \-64 | \-mp | \-dp
+precision of arithmetic computations:
+.nf
+-32: use 32 bit integers;
+-64: use 64 bit integers;
+-mp: use arbitrary precision arithmetics;
+-dp: use default precision.
+.fi
+
+.TP
+.B Output format selection :
+
+.TP
+\-v
+textual output, prints full results.
+
+.TP
+\-q
+textual output, counts numbers of siphons or traps and prints them.
+
+.TP
+.B Input format flags:
+
+.TP
+\-NET | -NDR | -PNML | -TPN | -TTS
+Specifies the format of the input net. This flag is necessary when the
+input net is read on standard input, or read from a file that does not
+bear the expected extension. By default, the net is assumed in \&.net or
+\&.ndr format.
+
+.TP
+.B Input source:
+
+.TP
+infile
+Where the  net is  read. The  input format is  determined by  the file
+type, according to the table below. If absent or specified by "-", the
+net is  read on standard  input in the  format specified by  the input
+flag. If  both an  infile and  some input flag  are present,  then the
+format defined  by the  input flag supersedes  that determined  by the
+infile extension.
+
+.nf
+file extension		input format
+--------------------------------------------------------------
+\&.net			net format
+\&.ndr			ndr format
+\&.tpn			tpn format
+\&.pnml			pnml format
+\&.tts			tts format
+.fi
+
+.TP
+.B Output destination:
+
+.TP
+outfile
+Where  results are  written.   If  absent or  specified  by "-",  then
+results are written on standard output.
+
+
+.TP
+.B Errors destination:
+
+.TP
+errorfile
+Where error messages are written. By default, errors are printed on standard error.
+
+
+.TP
+.B Default options are :
+
+stan -v -S
+
+
+.SH EXAMPLES
+
+.nf
+stan nets/ifip.ndr
+stan -T -q nets/ifip.ndr
+.fi
+
+
+.SH SEE ALSO
+
+nd(n), tina(n), plan(n), ktzio(n), ndrio(n), tedd(n), selt(n), sift(n), muse(n), pathto(n), scan(n), struct(n), play(n), walk(n), reduce(n), formats(n)
+
+.SH AUTHORS
+Bernard Berthomieu, LAAS/CNRS, 2000-2026, Bernard.Berthomieu@laas.fr.
+

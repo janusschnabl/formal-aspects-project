@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from itertools import product
 import re
 
-from ..names import validate_lola_name
+from ..names import validate_agent_name
 from ..net import Arc, InputArc, Marking, OutputArc, PetriNet, Place, Transition
 from .model import VAR, AgentNet, GlobalTransition, MultiAgentNet
 
@@ -44,7 +44,7 @@ class ConversionResult:
 
 def _name(name: str) -> None:
     try:
-        validate_lola_name(name)
+        validate_agent_name(name)
     except ValueError as e:
         raise ConversionError(str(e)) from None
 

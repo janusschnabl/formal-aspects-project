@@ -19,7 +19,7 @@ Rules:
     for each combination of values. SET is `a..b`, `{x, y, z}` or a name from `index:`.
     Inside brackets, `v`, `v+1` and `v-1` are replaced by the value.
     Multiple indices use repeated brackets, e.g. q[i][j], never q[i,j].
-    Expanded names must be valid, non-reserved LoLA identifiers.
+    Expanded names keep this syntax; checker keywords are allowed.
   - `places`, `transitions`, `labels`, `arcs`, `read` belong to the most recent `agent:`.
 """
 
@@ -28,7 +28,7 @@ from __future__ import annotations
 import itertools
 import re
 
-from ..names import validate_lola_name
+from ..names import validate_agent_name
 from .model import VAR, AgentNet, MultiAgentNet, Weight
 
 IDENT = r"[A-Za-z_][A-Za-z0-9_]*"
@@ -162,9 +162,9 @@ def _hint(name: str) -> str:
     return ""
 
 
-def _check_lola_name(name: str, lineno: int) -> None:
+def _check_name(name: str, lineno: int) -> None:
     try:
-        validate_lola_name(name)
+        validate_agent_name(name)
     except ValueError as e:
         raise ParseError(lineno, str(e)) from None
 
@@ -223,7 +223,7 @@ def parse(text: str) -> MultiAgentNet:
             names = _unique([n.group(0) for b in bodies for n in _scan(b, NAME_LIST_RE, lineno, "name")], len(bodies) > 1)
             what = "place" if section == "places" else "transition"
             for n in names:
-                _check_lola_name(n, lineno)
+                _check_name(n, lineno)
                 if n in kind:
                     k, a = kind[n]
                     raise ParseError(lineno, f"{n!r} already declared as a {k} of agent {a}")
@@ -233,7 +233,7 @@ def parse(text: str) -> MultiAgentNet:
         elif section == "labels":
             for t, l in _unique([(m.group(1), m.group(2)) for b in bodies for m in _scan(b, LABEL_RE, lineno, "label (expected transition=label)")], len(bodies) > 1):
                 if l not in SILENT:
-                    _check_lola_name(l, lineno)
+                    _check_name(l, lineno)
                 label_lines.append((lineno, agent, t, None if l in SILENT else l))
 
         elif section == "arcs":

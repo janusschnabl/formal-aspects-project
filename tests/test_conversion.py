@@ -4,12 +4,10 @@ from collections import deque
 from copy import deepcopy
 from itertools import product
 import os
-import shutil
-import tempfile
 import unittest
 
 from petrinet import Marking, Place
-from petrinet import explore, lola
+from petrinet import explore, tina
 from petrinet.agentnet import VAR, ConversionError, convert, load, parse
 
 
@@ -155,8 +153,9 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(result.net.initial_marking, Marking({Place("p[-1][north]"): 2}))
         self.assertEqual(result.net.final_markings,
                          frozenset({Marking(), Marking({Place("p[0][north]"): 2})}))
-        exported = lola.to_lola(result.net)
-        self.assertIn("PLACE p[-1][north], p[0][north];", exported)
+        exported = tina.to_tina(result.net)
+        self.assertIn("pl {p[-1][north]} (2)", exported)
+        self.assertIn("pl {p[0][north]} (0)", exported)
         self.assertIn("go[-1][north]__k_A_2", exported)
 
     def test_read_arc_adds_to_existing_output(self):
@@ -198,7 +197,7 @@ class ConversionTests(unittest.TestCase):
         first, second = convert(source), convert(source)
         self.assertEqual(first.net.places, {Place(p) for p in source.places})
         self.assertEqual({t.name for t in first.net.transitions}, {"join__2", "join__2__2"})
-        self.assertEqual(lola.to_lola(first.net), lola.to_lola(second.net))
+        self.assertEqual(tina.to_tina(first.net), tina.to_tina(second.net))
 
     def test_global_label_can_match_a_silent_transition(self):
         source = parse(
@@ -234,12 +233,12 @@ class ConversionTests(unittest.TestCase):
         changes = [
             arc(0), arc(-1), arc(True), arc(1.5), arc("bad"), arc(1),
             lambda n: n.agents["A"].places.append("q[1,a]"),
-            lambda n: n.agents["A"].places.append("AG"),
+            lambda n: n.agents["A"].places.append(""),
             lambda n: n.agents["A"].places.append("p"),
             lambda n: n.agents["A"].places.append("r"),
             lambda n: setattr(n.agents["A"], "name", "wrong"),
             lambda n: n.agents["A"].labels.update({"missing": "go"}),
-            lambda n: n.agents["A"].labels.update({"move": "TRUE"}),
+            lambda n: n.agents["A"].labels.update({"move": "bad label"}),
             lambda n: n.agents["A"].arcs.update({("p", "q"): 1}),
             lambda n: n.agents["A"].arcs.update({("r", "move"): 1}),
             lambda n: n.agents["A"].read_arcs.append(("p", "move")),
@@ -258,17 +257,6 @@ class ConversionTests(unittest.TestCase):
                     convert(source)
         with self.assertRaises(ConversionError):
             convert(parse("agent: A\n places: p\n transitions: t\n read: (p, t)"))
-
-
-@unittest.skipUnless(shutil.which("lola"), "lola not on PATH")
-class RealConvertedLolaTests(unittest.TestCase):
-    def test_indexed_conversion_parses_and_reaches_final(self):
-        result = convert(parse(INDEXED))
-        with tempfile.TemporaryDirectory() as tmp:
-            path = os.path.join(tmp, "net.lola")
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(lola.to_lola(result.net))
-            self.assertTrue(lola.check_formula(path, "EF (p[-1][north] = 0 AND p[0][north] = 2)", timeout=20))
 
 
 if __name__ == "__main__":

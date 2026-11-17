@@ -87,11 +87,60 @@ class DotTests(unittest.TestCase):
 
 
 class CliTests(unittest.TestCase):
+    def test_pipeline_reuses_one_parse_and_conversion_for_exports_and_check(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch("petrinet.__main__.render_svg", return_value="<svg/>"), \
+                mock.patch("petrinet.__main__.agentnet.load", wraps=agentnet.load) as load, \
+                mock.patch("petrinet.__main__.agentnet.convert", wraps=agentnet.convert) as convert, \
+                mock.patch("petrinet.__main__.tina.dead_transitions", return_value=[]) as check:
+            prefix = Path(tmp) / "new folder" / "example"
+            self.assertEqual(run_cli([os.path.join(EXAMPLES, "example.txt"), "--agentnet",
+                                      "--pipeline", str(prefix), "--timeout", "10"]),
+                             (0, "No dead transitions.\n", ""))
+            load.assert_called_once()
+            convert.assert_called_once()
+            check.assert_called_once()
+            from petrinet.tina import to_tina
+            self.assertEqual(Path(f"{prefix}.net").read_text(encoding="utf-8"), to_tina(check.call_args.args[0]))
+            self.assertEqual(check.call_args.args[1:], (None, 10))
+            self.assertEqual(len(list(prefix.parent.iterdir())), 5)
+
+    def test_raw_render_skips_conversion_and_analysis(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch("petrinet.__main__.render_svg", return_value="<svg/>"), \
+                mock.patch("petrinet.__main__.agentnet.convert") as convert, \
+                mock.patch("petrinet.__main__.tina.dead_transitions") as check:
+            source = Path(tmp) / "unbalanced.txt"
+            source.write_text("agent: A\n places: p q\n transitions: t\n arcs: (p, t, 2) (t, q)\n", encoding="utf-8")
+            prefix = Path(tmp) / "out" / "example"
+            self.assertEqual(run_cli([str(source), "--agentnet", "--raw-render", str(prefix)]), (0, "", ""))
+            convert.assert_not_called()
+            check.assert_not_called()
+            self.assertEqual(sorted(p.name for p in prefix.parent.iterdir()), ["example-agent.dot", "example-agent.svg"])
+
+    def test_render_mode_conflicts_are_rejected(self):
+        for flags in [["--raw-render", "example"], ["--agentnet", "--raw-render", "example", "--emit", "-"],
+                      ["--pipeline", "example", "--render", "other"],
+                      ["--pipeline", "example", "--emit", "-"],
+                      ["--pipeline", "example", "--raw-render", "other"]]:
+            with self.subTest(flags=flags):
+                self.assertEqual(run_cli(["unused.txt", *flags])[0], 2)
+
+    def test_pipeline_render_failure_skips_check_and_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch("petrinet.__main__.render_svg", side_effect=GraphvizError("render failed")), \
+                mock.patch("petrinet.__main__.tina.dead_transitions") as check:
+            prefix = Path(tmp) / "out" / "example"
+            self.assertEqual(run_cli([os.path.join(EXAMPLES, "example.txt"), "--agentnet", "--pipeline", str(prefix)]),
+                             (2, "", "error: render failed\n"))
+            self.assertFalse(prefix.parent.exists())
+            check.assert_not_called()
+
     def test_render_pipeline_writes_all_five_files_with_one_conversion(self):
         with tempfile.TemporaryDirectory() as tmp, \
                 mock.patch("petrinet.dot.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "<svg/>", "")) as render, \
                 mock.patch("petrinet.__main__.agentnet.convert", wraps=agentnet.convert) as convert, \
-                mock.patch("petrinet.__main__.lola.dead_transitions") as check:
+                mock.patch("petrinet.__main__.tina.dead_transitions") as check:
             prefix = Path(tmp) / "new folder" / "example"
             status, out, err = run_cli([
                 os.path.join(EXAMPLES, "example.txt"), "--agentnet", "--render", str(prefix),
@@ -106,7 +155,7 @@ class CliTests(unittest.TestCase):
             self.assertIn("label: dukOp", render.call_args.kwargs["input"])
             self.assertEqual(Path(f"{prefix}.svg").read_text(encoding="utf-8"), "<svg/>")
             self.assertEqual(Path(f"{prefix}-agent.svg").read_text(encoding="utf-8"), "<svg/>")
-            self.assertIn("TRANSITION dukOp", Path(f"{prefix}.lola").read_text(encoding="utf-8"))
+            self.assertIn("tr {dukOp}", Path(f"{prefix}.net").read_text(encoding="utf-8"))
             self.assertIn("digraph net", Path(f"{prefix}.dot").read_text(encoding="utf-8"))
             self.assertIn("cluster_a0", Path(f"{prefix}-agent.dot").read_text(encoding="utf-8"))
 
@@ -125,7 +174,7 @@ class CliTests(unittest.TestCase):
             with self.subTest(error=type(error)), tempfile.TemporaryDirectory() as tmp, \
                     mock.patch("petrinet.dot.subprocess.run", side_effect=error):
                 prefix = Path(tmp) / "example"
-                output = Path(f"{prefix}.lola")
+                output = Path(f"{prefix}.net")
                 output.write_text("keep existing", encoding="utf-8")
                 status, out, err = run_cli([path, "--agentnet", "--render", str(prefix)])
                 self.assertEqual((status, out), (2, ""))
@@ -144,19 +193,17 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, \
                 mock.patch("petrinet.__main__.agentnet.load", wraps=agentnet.load) as load, \
                 mock.patch("petrinet.__main__.agentnet.convert", wraps=agentnet.convert) as convert, \
-                mock.patch("petrinet.__main__.lola.dead_transitions") as lola_check, \
-                mock.patch("petrinet.__main__.explore.dead_transitions") as builtin_check:
-            lola_file, dot_file, raw_file = [Path(tmp) / name for name in ("shop.lola", "shop.dot", "shop-agent.dot")]
+                mock.patch("petrinet.__main__.tina.dead_transitions") as check:
+            tina_file, dot_file, raw_file = [Path(tmp) / name for name in ("shop.net", "shop.dot", "shop-agent.dot")]
             status, out, err = run_cli([
-                os.path.join(EXAMPLES, "shop.txt"), "--agentnet", "--emit", str(lola_file),
+                os.path.join(EXAMPLES, "shop.txt"), "--agentnet", "--emit", str(tina_file),
                 "--dot", str(dot_file), "--raw-dot", str(raw_file),
             ])
             self.assertEqual((status, out, err), (0, "", ""))
             load.assert_called_once()
             convert.assert_called_once()
-            lola_check.assert_not_called()
-            builtin_check.assert_not_called()
-            self.assertEqual(lola_file.read_text(encoding="utf-8").count("TRANSITION "), 12)
+            check.assert_not_called()
+            self.assertEqual(tina_file.read_text(encoding="utf-8").count("tr "), 12)
             self.assertIn('xlabel="open[1]"', dot_file.read_text(encoding="utf-8"))
             self.assertIn("Customer.enter=3", dot_file.read_text(encoding="utf-8"))
             self.assertIn('label="*"', raw_file.read_text(encoding="utf-8"))
@@ -176,7 +223,7 @@ class CliTests(unittest.TestCase):
             with self.subTest(flag=flag):
                 status, out, err = run_cli([os.path.join(EXAMPLES, "shop.txt"), "--agentnet", flag, "-"])
                 self.assertEqual((status, err), (0, ""))
-                self.assertTrue(out.startswith("PLACE " if flag == "--emit" else "digraph net {"))
+                self.assertTrue(out.startswith("pl " if flag == "--emit" else "digraph net {"))
 
     def test_argument_errors(self):
         for flags, message in [
@@ -196,8 +243,6 @@ class CliTests(unittest.TestCase):
                 ("agent: A\n places: p[1,a]", ["--dot", "-"], "line 2"),
                 ("agent: A\n places: p q\n transitions: t\n arcs: (p, t, 2) (t, q)",
                  ["--dot", "-"], "does not preserve agents"),
-                ("agent: A\n places: p q\n transitions: t\n arcs: (p, t, *) (t, q, *)",
-                 ["--emit", str(Path(tmp) / "empty.lola"), "--dot", str(Path(tmp) / "empty.dot")], "at least one"),
                 (PAIRS, ["--dot", str(Path(tmp) / "missing" / "net.dot")], "error:"),
             ]
             for text, flags, message in cases:
@@ -206,35 +251,45 @@ class CliTests(unittest.TestCase):
                     status, out, err = run_cli([str(path), "--agentnet", *flags])
                     self.assertEqual((status, out), (2, ""))
                     self.assertIn(message, err)
-            self.assertFalse((Path(tmp) / "empty.lola").exists())
-            self.assertFalse((Path(tmp) / "empty.dot").exists())
             self.assertEqual(run_cli([str(Path(tmp) / "absent.txt"), "--agentnet", "--dot", "-"])[0], 2)
 
-    def test_empty_conversion_can_still_be_drawn(self):
+    def test_empty_conversion_can_be_drawn_and_exported(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "empty.txt"
             path.write_text("", encoding="utf-8")
             status, out, err = run_cli([str(path), "--agentnet", "--dot", "-"])
             self.assertEqual((status, err), (0, ""))
             self.assertIn("digraph net {", out)
+            self.assertEqual(run_cli([str(path), "--agentnet", "--emit", "-"]), (0, "\n", ""))
 
-    def test_standard_net_export_and_existing_builtin_check(self):
+    def test_standard_net_export(self):
         path = os.path.join(os.path.dirname(__file__), "nets", "two_dead.txt")
-        self.assertEqual(run_cli([path, "--builtin"]), (0, "Dead transitions:\n  t3\n  t4\n", ""))
         status, out, err = run_cli([path, "--dot", "-"])
         self.assertEqual((status, err), (0, ""))
         self.assertIn('xlabel="p1"', out)
 
-    def test_converted_net_can_be_checked_with_either_backend(self):
+    def test_converted_net_uses_tina_by_default(self):
         path = os.path.join(EXAMPLES, "shop.txt")
-        self.assertEqual(run_cli([path, "--agentnet", "--builtin"]), (0, "No dead transitions.\n", ""))
-        with mock.patch("petrinet.__main__.lola.dead_transitions", return_value=[]) as check:
+        with mock.patch("petrinet.__main__.tina.dead_transitions", return_value=[]) as check:
             self.assertEqual(run_cli([path, "--agentnet"]), (0, "No dead transitions.\n", ""))
             self.assertEqual(len(check.call_args.args[0].transitions), 12)
 
 
 @unittest.skipUnless(shutil.which("dot"), "Graphviz dot not on PATH")
 class RealGraphvizTests(unittest.TestCase):
+    def test_full_pipeline_draws_both_models_and_checks_with_real_tina(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prefix = Path(tmp) / "output folder" / "example"
+            self.assertEqual(run_cli([os.path.join(EXAMPLES, "example.txt"), "--agentnet",
+                                      "--pipeline", str(prefix), "--timeout", "15"]),
+                             (0, "No dead transitions.\n", ""))
+            for suffix in [".svg", "-agent.svg"]:
+                self.assertEqual(ElementTree.parse(f"{prefix}{suffix}").getroot().tag,
+                                 "{http://www.w3.org/2000/svg}svg")
+            standard = os.path.join(os.path.dirname(__file__), "nets", "two_dead.txt")
+            self.assertEqual(run_cli([standard, "--pipeline", str(Path(tmp) / "two_dead")]),
+                             (0, "Dead transitions:\n  t3\n  t4\n", ""))
+
     def test_cli_pipeline_creates_both_svgs(self):
         with tempfile.TemporaryDirectory() as tmp:
             prefix = Path(tmp) / "folder with spaces" / "example"

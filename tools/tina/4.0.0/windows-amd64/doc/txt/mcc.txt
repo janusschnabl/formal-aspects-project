@@ -1,0 +1,57 @@
+4mmcc24m(n)                                                                  4mmcc24m(n)
+
+1mNAME0m
+       mcc    - High-Level Petri nets unfolder
+
+       Part of Tina Toolbox for analysis of Petri nets and Time Petri nets.
+
+
+1mSYNOPSIS0m
+       1mmcc [command] [flags]0m
+
+
+
+1mDESCRIPTION0m
+       mcc  transforms  High-Level  Petri  nets in PNML format into equivalent
+       Place/Transition nets.
+
+
+1mOPTIONS0m
+       1mUsage:0m
+                mcc [command]
+
+              Available Commands:
+                help        Help about any command
+                info        Print statistics or generate textual  version  for
+              use with NetDraw (nd)
+                lola        Generate a P/T net using the LoLa format
+                pnml        Generate a P/T net using the PNML format
+                skeleton     Generate  the  skeleton  of a colored net in .net
+              format
+                smpt        Generate a P/T net file for use with SMPT
+                tina        Generate a P/T net file using Tina's .net format
+                version     Print the version number
+
+              Flags:
+                -h, --help      help for mcc
+                -v, --version   version for mcc
+
+              Use "mcc [command] --help" for more information about a command.
+
+
+1mEXAMPLES0m
+       mcc
+       mcc pnml -i model-COL.pnml -o model-PT.pnml
+
+
+1mSEE ALSO0m
+       nd(n),  tina(n),  plan(n),  struct(n),  ktzio(n),  ndrio(n),   tedd(n),
+       selt(n), sift(n), pathto(n), scan(n), play(n), walk(n), reduce(n), for-
+       mats(n), stan(n)
+
+
+1mAUTHORS0m
+       Silvano Dal Zilio, LAAS/CNRS, 2019-2026, dalzilio@laas.fr.
+
+
+Tina Tools                       Version 4.0.0                          4mmcc24m(n)

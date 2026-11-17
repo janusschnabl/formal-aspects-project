@@ -1,0 +1,189 @@
+4mstruct24m(n)                                                            4mstruct24m(n)
+
+1mNAME0m
+       struct - Structural analysis tool
+
+       Part of Tina Toolbox for analysis of Petri nets and Time Petri nets.
+
+
+1mSYNOPSIS0m
+       1mstruct 22m[-4mh24melp]
+              [-S | -F] [-I | -Q] [-P | -T] [-safe]
+              [-32 | -64 | -mp | -dp] [-native | -4ti2]
+              [-raw | -reduce | -rlimit n] [-t s]
+              [-v | -vl | -q | -c | -j | -j2 | -j3] [-flimit n]
+              [-NET | -NDR | -PNML | -TPN | -TTS]
+              [infile] [outfile] [errorfile]
+
+
+
+1mDESCRIPTION0m
+       struct  computes  generator sets for  semiflows, or bases of  flows, on
+       places and transitions.  It takes  as input descriptions of a  Priority
+       Time   Petri  net  in  textual  form (.net,  .pnml,  .tpn  formats)  or
+       graphical  form (.ndr  format  of  files produced  by  nd, .pnml   with
+       graphics), or a Time Transition System description in .tts format.
+
+
+
+1mOPTIONS0m
+       -4mh24melp  Recalls options.
+
+
+       1mOperating mode options:0m
+
+
+       -P | -T
+              Computes  semiflows or flows for places only (-P) or transitions
+              only (-T).  In absence of either flag, computes them for both.
+
+
+       -S | -F
+              Computes semiflow  generator sets (-S) or  flow bases  (-F).  If
+              -S  and  output is -v  or   -s,  also  computes  the   invariant
+              and  consistent properties.
+
+
+       -I | -Q
+              Computes  semiflow (resp. flow) basis  such  that    any   semi-
+              flow  (resp.  flow)  is a  linear combination with  integer (-I)
+              or rational (-Q) coefficients of those in basis (nonnegative  if
+              -S, in addition).
+
+
+       -safe  Evaluates  a  sufficient condifion for net safeness, using semi-
+              flows on places.
+
+
+       -32 | -64 | -mp | -dp
+              precision of arithmetic computations:
+              -32: use 32 bit integers;
+              -64: use 64 bit integers;
+              -mp: use arbitrary precision arithmetics;
+              -dp: use default precision.
+
+
+       -native
+              Use the native solver for computation of flows or semiflows (de-
+              fault).
+
+
+       -4ti2  Use the 4ti2 solver (www.4ti2.de) rather than the native  imple-
+              mentations  for  computation of flows or semiflows.  This option
+              requires to compile and install the 4ti2  toolset  on  your  ma-
+              chine.  4ti2  is  significantly faster on large nets, especially
+              when using option -I.
+
+
+       1mOutput format selection :0m
+
+
+       -v     textual output, prints net  and  full  results  (flows,  invari-
+              ant/consistent  properties)  and  structural  safeness  if -safe
+              passed)
+
+
+       -vl    like -v except does not print the net nor  compute  the  invari-
+              ant/consistent/safe properties.
+
+
+       -q     textual output, prints a summary of results (flow counts + prop-
+              erties)
+
+
+       -c     textual output, just prints the numbers of flows or semiflows.
+
+
+       -j | -j2 | -j3
+              prints  [semi]flows  in  json format, with several levels of de-
+              tail:
+              -j3: most detailled, selt explanatory
+              -j2: like -j3 except node names are replaced by their indices in the lexicograophic order
+              -j : just prints indices of nodes with non null coefficients (supports)
+
+
+       -flimit n
+              Sets to n the maximum number of [semi]flows printed (default 100
+              in textual output, 0 otherwise, 0 means no limit).
+
+
+       -raw | -reduce | -rlimit n
+              To speed up computation of [semi]flows, struct may apply first a
+              reduction pass on the net, enabled by default or by the  -reduce
+              option).   As reduction of very large nets may be costly, it may
+              be skipped by the -raw option or restricted to nets of size  not
+              exceeding  n by option -rlimit n (in number of places or transi-
+              tions), n=0 means no limit.
+
+
+
+       1mInput format flags:0m
+
+
+       -NET | -NDR | -PNML | -TPN | -TTS
+              Specifies the format of the input net. This  flag  is  necessary
+              when  the  input  net  is read on standard input, or read from a
+              file that does not bear the expected extension. By default,  the
+              net is assumed in .net or .ndr format.
+
+
+       1mInput source:0m
+
+
+       infile Where  the   net  is   read. The  input format is  determined by
+              the file type, according to the table below. If absent or speci-
+              fied by "-", the net is  read on standard  input in the   format
+              specified  by  the input flag. If  both an  infile and  some in-
+              put flag  are present,  then the format defined  by  the   input
+              flag supersedes  that determined  by the infile extension.
+
+              file extension      input format
+              --------------------------------------------------------------
+              .net           net format
+              .ndr           ndr format
+              .tpn           tpn format
+              .pnml               pnml format
+              .tts           tts format
+
+
+       1mOutput destination:0m
+
+
+       outfile
+              Where  results are  written.   If  absent or  specified  by "-",
+              then results are written on standard output.
+
+
+
+       1mErrors destination:0m
+
+
+       errorfile
+              Where error messages are written. By default, errors are printed
+              on standard error.
+
+
+
+       1mDefault options are :0m
+
+              struct -t 0 -v -S -Q -reduce -rlimit 0 -flimit 100
+
+
+
+1mEXAMPLES0m
+       struct < nets/ifip.ndr > ifip.struct
+       struct -q nets/ifip.ndr ifip.struct
+
+
+
+1mSEE ALSO0m
+       nd(n), tina(n), plan(n), ktzio(n), ndrio(n), tedd(n), selt(n), sift(n),
+       muse(n),  pathto(n),  scan(n), play(n), walk(n), reduce(n), formats(n),
+       stan(n)
+
+
+1mAUTHORS0m
+       Bernard Berthomieu, LAAS/CNRS, 2000-2026, Bernard.Berthomieu@laas.fr.
+
+
+Tina Tools                       Version 4.0.0                       4mstruct24m(n)

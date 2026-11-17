@@ -1,0 +1,2 @@
+# Keep upstream distributions byte-for-byte intact, including Linux scripts.
+tools/tina/4.0.0/** -text
