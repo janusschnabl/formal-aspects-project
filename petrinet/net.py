@@ -1,6 +1,6 @@
 """The classical place/transition Petri net, as defined in the course.
 
-    N = (P, T, F, m_0)
+    N = ((P, T, F), m_0), optionally with accepting markings M_F
 
     P                               a finite set of places          -> set of Place
     T                               a finite set of transitions     -> set of Transition
@@ -43,6 +43,7 @@ Example:
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 
@@ -202,7 +203,10 @@ class Marking:
 
 
 class PetriNet:
-    """N = (P, T, F, m_0). The constructor checks that the four parts fit together."""
+    """N = ((P, T, F), m_0), optionally with a set of final markings M_F.
+
+    Final markings are acceptance conditions; they do not stop firing.
+    """
 
     def __init__(
         self,
@@ -210,6 +214,8 @@ class PetriNet:
         transitions: set[Transition],
         arcs: set[Arc],
         initial_marking: Marking | None = None,
+        *,
+        final_markings: Iterable[Marking] | None = None,
     ) -> None:
         self._places = frozenset(places)
         self._transitions = frozenset(transitions)
@@ -221,6 +227,11 @@ class PetriNet:
         self._check_places_and_transitions()
         self._check_arcs()
         self._check_initial_marking()
+        finals = []
+        for marking in (() if final_markings is None else final_markings):
+            self._check_marking(marking, "final marking")
+            finals.append(marking)
+        self._final_markings = frozenset(finals)
 
         # W, so that weight(x, y) does not have to search F every time.
         self._weights: dict[tuple[Place | Transition, Place | Transition], int] = {}
@@ -242,6 +253,14 @@ class PetriNet:
     @property
     def initial_marking(self) -> Marking:
         return self._initial_marking
+
+    @property
+    def final_markings(self) -> frozenset[Marking]:
+        return self._final_markings
+
+    def is_final(self, marking: Marking) -> bool:
+        """Whether marking is exactly one of M_F (unlisted places have zero)."""
+        return marking in self._final_markings
 
     def _check_places_and_transitions(self) -> None:
         names_seen: set[str] = set()
@@ -272,11 +291,14 @@ class PetriNet:
             pairs_seen.add(pair)
 
     def _check_initial_marking(self) -> None:
-        if not isinstance(self._initial_marking, Marking):
-            raise PetriNetError(f"m_0 must be a Marking, got {self._initial_marking!r}")
-        for place in self._initial_marking.marked_places():
+        self._check_marking(self._initial_marking, "m_0")
+
+    def _check_marking(self, marking: Marking, description: str) -> None:
+        if not isinstance(marking, Marking):
+            raise PetriNetError(f"{description} must be a Marking, got {marking!r}")
+        for place in marking.marked_places():
             if place not in self._places:
-                raise PetriNetError(f"m_0 gives tokens to {place}, which is not in P")
+                raise PetriNetError(f"{description} gives tokens to {place}, which is not in P")
 
     def _check_transition(self, transition: Transition) -> None:
         if transition not in self._transitions:

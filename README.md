@@ -1,8 +1,10 @@
-# Petri net dead-transition checker
+# Petri net conversion and dead-transition checker
 
 Describe a Petri net in a text file and find out which transitions are **dead**,
 i.e. can never fire from the initial marking. The checking is done by
 [LoLA 2.0](https://theo.informatik.uni-rostock.de/theo-forschung/tools/lola/).
+Multi-agent files can also be converted into standard weighted Petri nets,
+exported to LoLA, and drawn with Graphviz.
 
 ```
 $ python -m petrinet examples/two_dead.txt
@@ -11,7 +13,8 @@ Dead transitions:
   t4
 ```
 
-You need Python 3.10+ and LoLA. No Python packages are required.
+You need Python 3.10+. No Python packages are required. LoLA is needed only
+for LoLA analysis; conversion, DOT export, and the built-in checker work without it.
 
 ## Installing LoLA
 
@@ -47,7 +50,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ## Writing a net
 
-The file follows the formal definition N = (P, T, F, m_0), where
+The file follows the formal definition N = ((P, T, F), m_0), where
 F ⊆ (P × T × w) ∪ (T × P × w) and w is a positive integer:
 
 ```
@@ -79,7 +82,8 @@ Mistakes are reported with a line number, e.g.
 ## Multi-agent nets (our formalism)
 
 `petrinet.agentnet` reads nets in our formalism N = ((A, {N_a}, L), M0, MF), with
-N_a = (P_a, T_a, F_a, W_a, C_a, l_a). It does not convert them to LoLA yet. See
+N_a = (P_a, T_a, F_a, W_a, C_a, l_a), and converts them to a standard weighted
+`PetriNet`. See
 `examples/agents/shop.txt`:
 
 ```
@@ -98,15 +102,51 @@ final: home=3                                     # one 'final:' per marking in 
 ```
 
 A `for` clause repeats its whole line (several variables: `for i in I, j in J`, names like
-`q[i,j]`); items on the line that don't use the index are kept once. Inside brackets you can
-use `k`, `k+1` and `k-1`. Names are global, so overlap between agents is a parse error.
+`q[i][j]`); items on the line that don't use the index are kept once. Inside each bracket
+pair you can use `k`, `k+1` and `k-1`, including negative indices. For example,
+`q[i][j] for i in 1..2, j in {north, south}` declares `q[1][north]`,
+`q[1][south]`, `q[2][north]`, and `q[2][south]`. Names are global, so overlap
+between agents is a parse error.
+
+**Place names are preserved exactly after index expansion**, including square
+brackets, in the standard model, LoLA output, and diagrams. Multi-index names
+must use repeated brackets: `q[i,j]` is rejected because LoLA treats commas as
+separators. Commas are still allowed between items and `for` bindings. Expanded
+place, transition, and non-silent label names must also avoid LoLA's case-sensitive
+reserved words, including `PLACE`, `FIREABLE`, `TRUE`, `oo`, and CTL operator
+strings such as `A` or `AGEF`. Agent type names such as `A` are unaffected.
+The agent format keeps its existing base-name syntax (letters, digits, underscores);
+the general LoLA exporter also accepts compatible names containing periods.
 
 ```python
-from petrinet.agentnet import load
-net = load("examples/agents/shop.txt")
-net.global_transitions()       # G, with synchronised transitions merged
-net.well_formedness_errors()   # [] if well-formed (agent preservation, variable-arc pairing, ...)
+from petrinet.agentnet import convert, load
+from petrinet.lola import to_lola
+
+source = load("examples/agents/shop.txt")
+source.global_transitions()       # G, with synchronised transitions grouped
+source.well_formedness_errors()   # [] if well-formed
+result = convert(source)
+net = result.net                  # the standard PetriNet, ready for either checker
+print(to_lola(net))
+print(result.place_map["open[1]"])  # Place("open[1]"), with no alias
+for transition, origin in result.transition_origins.items():
+    print(transition.name, origin.global_transition.members, origin.multiplicities)
 ```
+
+Conversion validates the source, merges synchronized local transitions atomically,
+keeps fixed arc weights, and replaces each read arc with a pair of weight-1 arcs.
+Each local variable-arc pair is expanded from weight 1 through that agent type's
+initial population. Independent pairs use every combination of their weights.
+No transitions are pruned, even when some copies are unreachable. A pair whose
+agent population is zero has no variants. The shop example produces 7 places
+and 12 transitions. Generated transition names include choices such as
+`enter__k_Customer_3`; collision suffixes apply only to transitions.
+
+The standard model preserves `initial_marking` and `final_markings` (a
+`frozenset[Marking]`). `net.is_final(marking)` tests exact membership; being final
+does not stop firing. Final markings are acceptance metadata in Python and are
+listed in diagrams. They are not declarations in the LoLA file; acceptance queries
+are left for a later extension. The standard text format remains unchanged.
 
 ## Running it
 
@@ -118,6 +158,74 @@ python -m petrinet mynet.txt --emit -         # show the net as LoLA sees it
 python -m petrinet mynet.txt --builtin        # check without LoLA (small nets only)
 python -m petrinet mynet.txt --lola PATH      # use a LoLA that isn't on PATH
 python -m petrinet mynet.txt --timeout 60     # max seconds per LoLA query
+python -m petrinet examples/agents/shop.txt --agentnet --emit shop.lola
+python -m petrinet examples/agents/shop.txt --agentnet --builtin
+```
+
+`--agentnet` selects the multi-agent input format. With no export options, the
+converted net is passed to the selected checker. Analysis reports dead transitions
+without removing anything. LoLA and conversion errors are reported on stderr with
+exit code 2.
+
+## Inspecting nets with Graphviz
+
+Convert and render an agent file with one command (Python and Graphviz required):
+
+```sh
+python -m petrinet examples/agents/example.txt --agentnet --render example
+```
+
+This writes `example.lola`, `example.dot`, `example.svg`, `example-agent.dot`,
+and `example-agent.svg`, without running analysis or pruning. `--render out/example`
+creates the output directory if necessary. The same command works in Git Bash
+and WSL; use `python3` in WSL if `python` is not available. Graphviz's `dot`
+must be on PATH, or specify `--graphviz /path/to/dot` (a quoted Windows path to
+`dot.exe` also works). Rendering failures are reported before output files are
+written. `--render` cannot be combined with the individual export flags below.
+
+Export the full standard net, the raw agent model, or both:
+
+```sh
+python -m petrinet examples/agents/shop.txt --agentnet --dot shop.dot
+python -m petrinet examples/agents/shop.txt --agentnet --raw-dot shop-agent.dot
+# All exports can be requested together; parsing and conversion happen only once:
+python -m petrinet examples/agents/shop.txt --agentnet --emit shop.lola --dot shop.dot --raw-dot shop-agent.dot
+```
+
+`--dot` also works on ordinary standard-net input. `--raw-dot` requires
+`--agentnet` and draws local transitions grouped by agent, preserving `*` arcs,
+read arcs, and synchronization labels. A raw-only export skips conversion and
+conservation checks, so it can help inspect a model that is not yet well-formed.
+Standard diagrams show initial token counts, weighted arcs, all expanded copies,
+their global identity and chosen multiplicities, and the final-marking set.
+
+Any export option makes the command exit without running analysis. Outputs must
+have distinct destinations; at most one can use `-` for stdout. Empty nets can be
+drawn, but LoLA export requires at least one place and one transition and never
+adds artificial nodes.
+
+DOT export needs only Python. To render an SVG, install
+[Graphviz](https://graphviz.org/download/) and run:
+
+```sh
+dot -Tsvg shop.dot -o shop.svg
+dot -Tsvg shop-agent.dot -o shop-agent.svg
+```
+
+Open the SVG in a browser to inspect and zoom. LoLA can produce diagrams of
+particular witness runs; these DOT exports instead draw the complete model.
+
+The same exporters are available in Python:
+
+```python
+from petrinet.dot import to_agent_dot, to_dot
+
+raw_dot = to_agent_dot(source)
+converted_dot = to_dot(
+    result.net,
+    transition_labels={t: o.display_name for t, o in result.transition_origins.items()},
+)
+# to_dot(net, marking=some_marking) can show a different marking without mutating net.
 ```
 
 `--builtin` uses a simple Python search over all reachable markings. It is useful
@@ -141,10 +249,10 @@ If LoLA answers *false*, `t` is dead.
 ## Code structure
 
 Everything goes through one class, `PetriNet`, which is the classical net
-N = (P, T, F, m_0):
+N = ((P, T, F), m_0), optionally extended with final markings M_F:
 
 ```
-our formalism ──translate──▶ PetriNet ──lola.to_lola──▶ LoLA
+agent file ──parse──▶ MultiAgentNet ──convert──▶ PetriNet ──lola.to_lola──▶ LoLA
 text file ──────parse──────▶ PetriNet ──explore───────▶ built-in check
 ```
 
@@ -154,10 +262,13 @@ text file ──────parse──────▶ PetriNet ──explore─
 | `petrinet/parser.py` | text format → `PetriNet` |
 | `petrinet/lola.py` | `PetriNet` → LoLA syntax, and running LoLA |
 | `petrinet/explore.py` | built-in reachability search |
+| `petrinet/agentnet/convert.py` | bounded variable-arc expansion, synchronization, read arcs, and provenance |
+| `petrinet/names.py` | shared name validation for LoLA nets and formulas |
+| `petrinet/dot.py` | standard and raw-agent diagrams in Graphviz DOT |
 
 ## Building a net in Python
 
-Each part of N = (P, T, F, m_0) has its own class, and each class enforces
+Each part of N = ((P, T, F), m_0) has its own class, and each class enforces
 its part of the definition:
 
 | Definition | Class | Enforces |
@@ -183,6 +294,7 @@ net = PetriNet(
     transitions={start},                                    # T
     arcs={InputArc(idle, start), OutputArc(start, busy, weight=2)},    # F
     initial_marking=Marking({idle: 1}),                     # m_0
+    final_markings=[Marking({busy: 2})],                   # optional M_F
 )
 
 print(to_lola(net))
@@ -199,7 +311,9 @@ and `net.fire(m, t)` follow the firing rule. Firing returns a new `Marking`.
 python -m unittest discover -s tests -t .
 ```
 
-The tests that need LoLA are skipped if it isn't installed.
+The tests that need LoLA or Graphviz are skipped if the relevant executable is
+not on PATH. The remaining tests include comparison with direct source firing
+semantics, name preservation, final markings, DOT, and CLI exports.
 
 ## Troubleshooting
 

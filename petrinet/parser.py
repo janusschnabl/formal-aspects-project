@@ -1,6 +1,6 @@
 """Read a Petri net from the plain-text format.
 
-The format mirrors N = (P, T, F, m_0):
+The format mirrors N = ((P, T, F), m_0):
 
     places: p1 p2 p3                  # P
     transitions: t1 t2                # T

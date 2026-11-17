@@ -5,8 +5,8 @@ Follows "Formal Aspects of Process Science", section 1:
     N_a = (P_a, T_a, F_a, W_a, C_a, l_a)        one agent net per agent type a
     N   = ((A, {N_a | a in A}, L), M0, MF)      the complete net
 
-Only the structure is modelled (no firing semantics); it is meant to be
-converted to a standard P/T net for verification. Names of places and
+The source structure is modelled here; convert() supplies execution semantics
+through a standard P/T net for verification. Names of places and
 transitions are global (agent nets are disjoint), so markings are dicts from
 place name to token count, with missing places meaning 0 tokens.
 """

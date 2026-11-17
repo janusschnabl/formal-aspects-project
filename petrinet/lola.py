@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 
 from .net import PetriNet, Transition
+from .names import validate_lola_name
 
 
 class LolaError(RuntimeError):
@@ -22,7 +23,7 @@ class LolaError(RuntimeError):
 
 
 def to_lola(net: PetriNet) -> str:
-    """Write the net in LoLA's syntax. Each part of N = (P, T, F, m_0) maps directly:
+    """Write the net in LoLA's syntax. N = ((P, T, F), m_0) maps directly:
 
         PLACE p1, p2;                 P
         MARKING p1: 1;                m_0 (places with 0 tokens are left out)
@@ -31,7 +32,15 @@ def to_lola(net: PetriNet) -> str:
           PRODUCE p2: 2;              W(t, p) for p ∈ t•
 
     P and T are sets, so they are written sorted by name to get the same file every time.
+    Final markings stay in Python; LoLA acceptance queries are separate properties.
     """
+    if not net.places or not net.transitions:
+        raise LolaError("LoLA export requires at least one place and one transition")
+    for node in sorted(net.places) + sorted(net.transitions):
+        try:
+            validate_lola_name(node.name)
+        except ValueError as e:
+            raise LolaError(str(e)) from None
     places = sorted(net.places)
 
     place_names = []

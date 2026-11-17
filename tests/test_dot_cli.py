@@ -1,0 +1,268 @@
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+import unittest
+from unittest import mock
+from xml.etree import ElementTree
+
+from petrinet import Marking, PetriNet, PetriNetError, Place, Transition
+from petrinet import agentnet
+from petrinet.__main__ import main
+from petrinet.dot import GraphvizError, render_svg, to_agent_dot, to_dot
+from tests.test_conversion import EXAMPLES, INDEXED, PAIRS
+
+
+def run_cli(args):
+    stdout, stderr = StringIO(), StringIO()
+    with redirect_stdout(stdout), redirect_stderr(stderr):
+        try:
+            status = main(args)
+        except SystemExit as e:
+            status = e.code
+    return status, stdout.getvalue(), stderr.getvalue()
+
+
+class DotTests(unittest.TestCase):
+    def test_standard_diagram_preserves_names_weights_and_acceptance(self):
+        result = agentnet.convert(agentnet.parse(INDEXED))
+        labels = {t: origin.display_name for t, origin in result.transition_origins.items()}
+        text = to_dot(result.net, transition_labels=labels)
+        self.assertIn('shape="circle"', text)
+        self.assertIn('shape="box"', text)
+        self.assertIn('xlabel="p[-1][north]"', text)
+        self.assertIn('xlabel="p[0][north]"', text)
+        self.assertIn('label="2"', text)
+        self.assertIn('label="go[-1][north]\\nA.move[-1][north]=2"', text)
+        self.assertIn('Final markings (unlisted places = 0):\\n{p[0][north]=2}\\n{}', text)
+        self.assertEqual(text, to_dot(result.net, transition_labels=labels))
+
+    def test_raw_diagram_preserves_agents_locals_reads_and_stars(self):
+        source = agentnet.load(os.path.join(EXAMPLES, "shop.txt"))
+        raw = to_agent_dot(source)
+        self.assertIn("subgraph cluster_a0", raw)
+        self.assertIn("subgraph cluster_a1", raw)
+        self.assertIn('label="Customer"', raw)
+        self.assertIn('label="Clerk"', raw)
+        self.assertIn('label="buy[1]\\nlabel: serve[1]"', raw)
+        self.assertIn('label="sell[1]\\nlabel: serve[1]"', raw)
+        self.assertIn('style="dashed", label="read"', raw)
+        self.assertIn('label="*"', raw)
+        self.assertIn('xlabel="open[1]"', raw)
+        self.assertIn("Same non-silent label = synchronized firing", raw)
+        self.assertIn("home=3", raw)
+        self.assertNotIn("__k_", raw)
+        self.assertEqual(raw, to_agent_dot(source))
+
+    def test_raw_indexed_names_are_identical(self):
+        source = agentnet.parse(INDEXED)
+        raw = to_agent_dot(source)
+        for name in source.places:
+            self.assertIn(f'xlabel="{name}"', raw)
+        self.assertIn("move[-1][north]", raw)
+
+    def test_empty_and_isolated_nodes_are_kept(self):
+        self.assertTrue(to_dot(PetriNet(set(), set(), set())).startswith("digraph net {"))
+        net = PetriNet({Place("alone")}, {Transition("idle")}, set())
+        self.assertIn('xlabel="alone"', to_dot(net))
+        self.assertIn('label="idle"', to_dot(net))
+        source = agentnet.parse("agent: A\n places: p\n transitions: t")
+        self.assertIn('label="t\\nsilent"', to_agent_dot(source))
+
+    def test_quotes_backslashes_and_newlines_are_escaped(self):
+        p = Place('p"\\\nq')
+        text = to_dot(PetriNet({p}, set(), set()))
+        self.assertIn('xlabel="p\\"\\\\\\nq"', text)
+
+    def test_diagram_can_show_another_marking_without_changing_the_net(self):
+        p = Place("p")
+        net = PetriNet({p}, set(), set())
+        self.assertIn('label="3"', to_dot(net, marking=Marking({p: 3})))
+        self.assertEqual(net.initial_marking[p], 0)
+        with self.assertRaises(PetriNetError):
+            to_dot(net, marking=Marking({Place("outside"): 1}))
+
+
+class CliTests(unittest.TestCase):
+    def test_render_pipeline_writes_all_five_files_with_one_conversion(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch("petrinet.dot.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "<svg/>", "")) as render, \
+                mock.patch("petrinet.__main__.agentnet.convert", wraps=agentnet.convert) as convert, \
+                mock.patch("petrinet.__main__.lola.dead_transitions") as check:
+            prefix = Path(tmp) / "new folder" / "example"
+            status, out, err = run_cli([
+                os.path.join(EXAMPLES, "example.txt"), "--agentnet", "--render", str(prefix),
+                "--graphviz", "path with spaces/dot",
+            ])
+            self.assertEqual((status, out, err), (0, "", ""))
+            convert.assert_called_once()
+            check.assert_not_called()
+            self.assertEqual(render.call_count, 2)
+            self.assertEqual(render.call_args.args[0], ["path with spaces/dot", "-Tsvg"])
+            self.assertNotIn("shell", render.call_args.kwargs)
+            self.assertIn("label: dukOp", render.call_args.kwargs["input"])
+            self.assertEqual(Path(f"{prefix}.svg").read_text(encoding="utf-8"), "<svg/>")
+            self.assertEqual(Path(f"{prefix}-agent.svg").read_text(encoding="utf-8"), "<svg/>")
+            self.assertIn("TRANSITION dukOp", Path(f"{prefix}.lola").read_text(encoding="utf-8"))
+            self.assertIn("digraph net", Path(f"{prefix}.dot").read_text(encoding="utf-8"))
+            self.assertIn("cluster_a0", Path(f"{prefix}-agent.dot").read_text(encoding="utf-8"))
+
+    def test_render_pipeline_also_handles_standard_nets(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch("petrinet.dot.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "<svg/>", "")) as render:
+            prefix = Path(tmp) / "standard"
+            path = os.path.join(os.path.dirname(__file__), "nets", "two_dead.txt")
+            self.assertEqual(run_cli([path, "--render", str(prefix)]), (0, "", ""))
+            render.assert_called_once()
+            self.assertEqual(len(list(Path(tmp).iterdir())), 3)
+
+    def test_render_failure_does_not_overwrite_existing_exports(self):
+        path = os.path.join(EXAMPLES, "example.txt")
+        for error in [FileNotFoundError(), subprocess.TimeoutExpired("dot", 60)]:
+            with self.subTest(error=type(error)), tempfile.TemporaryDirectory() as tmp, \
+                    mock.patch("petrinet.dot.subprocess.run", side_effect=error):
+                prefix = Path(tmp) / "example"
+                output = Path(f"{prefix}.lola")
+                output.write_text("keep existing", encoding="utf-8")
+                status, out, err = run_cli([path, "--agentnet", "--render", str(prefix)])
+                self.assertEqual((status, out), (2, ""))
+                self.assertIn("Graphviz", err)
+                self.assertEqual(output.read_text(encoding="utf-8"), "keep existing")
+                self.assertEqual(len(list(Path(tmp).iterdir())), 1)
+
+    def test_render_cannot_be_combined_with_individual_exports(self):
+        for flag in ["--emit", "--dot", "--raw-dot"]:
+            with self.subTest(flag=flag):
+                status, out, err = run_cli(["unused.txt", "--agentnet", "--render", "example", flag, "-"])
+                self.assertEqual((status, out), (2, ""))
+                self.assertIn("cannot be combined", err)
+
+    def test_combined_exports_parse_and_convert_once_without_analysis(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch("petrinet.__main__.agentnet.load", wraps=agentnet.load) as load, \
+                mock.patch("petrinet.__main__.agentnet.convert", wraps=agentnet.convert) as convert, \
+                mock.patch("petrinet.__main__.lola.dead_transitions") as lola_check, \
+                mock.patch("petrinet.__main__.explore.dead_transitions") as builtin_check:
+            lola_file, dot_file, raw_file = [Path(tmp) / name for name in ("shop.lola", "shop.dot", "shop-agent.dot")]
+            status, out, err = run_cli([
+                os.path.join(EXAMPLES, "shop.txt"), "--agentnet", "--emit", str(lola_file),
+                "--dot", str(dot_file), "--raw-dot", str(raw_file),
+            ])
+            self.assertEqual((status, out, err), (0, "", ""))
+            load.assert_called_once()
+            convert.assert_called_once()
+            lola_check.assert_not_called()
+            builtin_check.assert_not_called()
+            self.assertEqual(lola_file.read_text(encoding="utf-8").count("TRANSITION "), 12)
+            self.assertIn('xlabel="open[1]"', dot_file.read_text(encoding="utf-8"))
+            self.assertIn("Customer.enter=3", dot_file.read_text(encoding="utf-8"))
+            self.assertIn('label="*"', raw_file.read_text(encoding="utf-8"))
+
+    def test_raw_only_does_not_convert_or_require_well_formedness(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch("petrinet.__main__.agentnet.convert") as convert:
+            path = Path(tmp) / "unbalanced.txt"
+            path.write_text("agent: A\n places: p q\n transitions: t\n arcs: (p, t, 2) (t, q)\n", encoding="utf-8")
+            status, out, err = run_cli([str(path), "--agentnet", "--raw-dot", "-"])
+            self.assertEqual((status, err), (0, ""))
+            self.assertIn('label="2"', out)
+            convert.assert_not_called()
+
+    def test_stdout_exports(self):
+        for flag in ["--emit", "--dot", "--raw-dot"]:
+            with self.subTest(flag=flag):
+                status, out, err = run_cli([os.path.join(EXAMPLES, "shop.txt"), "--agentnet", flag, "-"])
+                self.assertEqual((status, err), (0, ""))
+                self.assertTrue(out.startswith("PLACE " if flag == "--emit" else "digraph net {"))
+
+    def test_argument_errors(self):
+        for flags, message in [
+            (["--raw-dot", "-"], "requires --agentnet"),
+            (["--emit", "-", "--dot", "-"], "at most one"),
+            (["--emit", "same.dot", "--dot", "./same.dot"], "distinct destinations"),
+        ]:
+            with self.subTest(flags=flags):
+                status, out, err = run_cli(["unused.txt", *flags])
+                self.assertEqual((status, out), (2, ""))
+                self.assertIn(message, err)
+
+    def test_input_conversion_and_output_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bad.txt"
+            cases = [
+                ("agent: A\n places: p[1,a]", ["--dot", "-"], "line 2"),
+                ("agent: A\n places: p q\n transitions: t\n arcs: (p, t, 2) (t, q)",
+                 ["--dot", "-"], "does not preserve agents"),
+                ("agent: A\n places: p q\n transitions: t\n arcs: (p, t, *) (t, q, *)",
+                 ["--emit", str(Path(tmp) / "empty.lola"), "--dot", str(Path(tmp) / "empty.dot")], "at least one"),
+                (PAIRS, ["--dot", str(Path(tmp) / "missing" / "net.dot")], "error:"),
+            ]
+            for text, flags, message in cases:
+                with self.subTest(message=message):
+                    path.write_text(text, encoding="utf-8")
+                    status, out, err = run_cli([str(path), "--agentnet", *flags])
+                    self.assertEqual((status, out), (2, ""))
+                    self.assertIn(message, err)
+            self.assertFalse((Path(tmp) / "empty.lola").exists())
+            self.assertFalse((Path(tmp) / "empty.dot").exists())
+            self.assertEqual(run_cli([str(Path(tmp) / "absent.txt"), "--agentnet", "--dot", "-"])[0], 2)
+
+    def test_empty_conversion_can_still_be_drawn(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "empty.txt"
+            path.write_text("", encoding="utf-8")
+            status, out, err = run_cli([str(path), "--agentnet", "--dot", "-"])
+            self.assertEqual((status, err), (0, ""))
+            self.assertIn("digraph net {", out)
+
+    def test_standard_net_export_and_existing_builtin_check(self):
+        path = os.path.join(os.path.dirname(__file__), "nets", "two_dead.txt")
+        self.assertEqual(run_cli([path, "--builtin"]), (0, "Dead transitions:\n  t3\n  t4\n", ""))
+        status, out, err = run_cli([path, "--dot", "-"])
+        self.assertEqual((status, err), (0, ""))
+        self.assertIn('xlabel="p1"', out)
+
+    def test_converted_net_can_be_checked_with_either_backend(self):
+        path = os.path.join(EXAMPLES, "shop.txt")
+        self.assertEqual(run_cli([path, "--agentnet", "--builtin"]), (0, "No dead transitions.\n", ""))
+        with mock.patch("petrinet.__main__.lola.dead_transitions", return_value=[]) as check:
+            self.assertEqual(run_cli([path, "--agentnet"]), (0, "No dead transitions.\n", ""))
+            self.assertEqual(len(check.call_args.args[0].transitions), 12)
+
+
+@unittest.skipUnless(shutil.which("dot"), "Graphviz dot not on PATH")
+class RealGraphvizTests(unittest.TestCase):
+    def test_cli_pipeline_creates_both_svgs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prefix = Path(tmp) / "folder with spaces" / "example"
+            status, out, err = run_cli([
+                os.path.join(EXAMPLES, "example.txt"), "--agentnet", "--render", str(prefix),
+            ])
+            self.assertEqual((status, out, err), (0, "", ""))
+            self.assertEqual(len(list(prefix.parent.iterdir())), 5)
+            for svg in [Path(f"{prefix}.svg"), Path(f"{prefix}-agent.svg")]:
+                self.assertEqual(ElementTree.parse(svg).getroot().tag, "{http://www.w3.org/2000/svg}svg")
+
+    def test_converted_and_raw_diagrams_render_as_svg(self):
+        source = agentnet.load(os.path.join(EXAMPLES, "shop.txt"))
+        result = agentnet.convert(source)
+        for text in [to_agent_dot(source), to_dot(result.net),
+                     to_dot(PetriNet({Place('p"\\\nq')}, set(), set()))]:
+            with self.subTest(text=text[:80]):
+                proc = subprocess.run(["dot", "-Tsvg"], input=text, capture_output=True, text=True, timeout=20)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertEqual(ElementTree.fromstring(proc.stdout).tag, "{http://www.w3.org/2000/svg}svg")
+
+
+class GraphvizDriverTests(unittest.TestCase):
+    def test_graphviz_errors_include_its_diagnostics(self):
+        with mock.patch("petrinet.dot.subprocess.run", return_value=subprocess.CompletedProcess([], 1, "", "syntax error")):
+            with self.assertRaisesRegex(GraphvizError, "syntax error"):
+                render_svg("invalid DOT")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -18,6 +18,8 @@ Rules:
   - `for v in SET, w in SET2` at the end of a line repeats everything on that line
     for each combination of values. SET is `a..b`, `{x, y, z}` or a name from `index:`.
     Inside brackets, `v`, `v+1` and `v-1` are replaced by the value.
+    Multiple indices use repeated brackets, e.g. q[i][j], never q[i,j].
+    Expanded names must be valid, non-reserved LoLA identifiers.
   - `places`, `transitions`, `labels`, `arcs`, `read` belong to the most recent `agent:`.
 """
 
@@ -26,10 +28,11 @@ from __future__ import annotations
 import itertools
 import re
 
+from ..names import validate_lola_name
 from .model import VAR, AgentNet, MultiAgentNet, Weight
 
 IDENT = r"[A-Za-z_][A-Za-z0-9_]*"
-NAME = rf"{IDENT}(?:\[[^\]\[]*\])?"          # p or p[...]
+NAME = rf"{IDENT}(?:\[[^\]\[]*\])*"          # p, p[i], or p[i][j]
 KEYWORDS = ("agent", "index", "places", "transitions", "labels", "arcs", "read", "initial", "final")
 AGENT_SECTIONS = ("places", "transitions", "labels", "arcs", "read")
 SILENT = ("eps", "epsilon", "ε", "tau")
@@ -86,6 +89,8 @@ def _substitute(body: str, env: dict[str, IndexValue], lineno: int) -> str:
     """Replace index expressions inside [...] using env, and normalise spacing."""
 
     def component(c: str) -> str:
+        if "," in c:
+            raise ParseError(lineno, "commas are not allowed inside names; use q[i][j] instead of q[i,j]")
         c = c.strip()
         m = re.fullmatch(rf"({IDENT})\s*(?:([+-])\s*(\d+))?", c)
         if m and m.group(1) in env:
@@ -99,7 +104,7 @@ def _substitute(body: str, env: dict[str, IndexValue], lineno: int) -> str:
             return c
         raise ParseError(lineno, f"bad index expression {c!r}")
 
-    return BRACKET_RE.sub(lambda m: "[" + ",".join(component(c) for c in m.group(1).split(",")) + "]", body)
+    return BRACKET_RE.sub(lambda m: "[" + component(m.group(1)) + "]", body)
 
 
 def _expand(body: str, indices: dict[str, list[IndexValue]], lineno: int) -> list[str]:
@@ -152,10 +157,16 @@ def _unique(items: list, expanded: bool) -> list:
 
 
 def _hint(name: str) -> str:
-    m = BRACKET_RE.search(name)
-    if m and any(re.fullmatch(IDENT, c) for c in m.group(1).split(",")):
+    if any(re.fullmatch(IDENT, m.group(1)) for m in BRACKET_RE.finditer(name)):
         return " (missing a 'for ... in ...' clause on this line? it only applies to its own line)"
     return ""
+
+
+def _check_lola_name(name: str, lineno: int) -> None:
+    try:
+        validate_lola_name(name)
+    except ValueError as e:
+        raise ParseError(lineno, str(e)) from None
 
 
 # ---- main parser ------------------------------------------------------------
@@ -212,6 +223,7 @@ def parse(text: str) -> MultiAgentNet:
             names = _unique([n.group(0) for b in bodies for n in _scan(b, NAME_LIST_RE, lineno, "name")], len(bodies) > 1)
             what = "place" if section == "places" else "transition"
             for n in names:
+                _check_lola_name(n, lineno)
                 if n in kind:
                     k, a = kind[n]
                     raise ParseError(lineno, f"{n!r} already declared as a {k} of agent {a}")
@@ -220,6 +232,8 @@ def parse(text: str) -> MultiAgentNet:
 
         elif section == "labels":
             for t, l in _unique([(m.group(1), m.group(2)) for b in bodies for m in _scan(b, LABEL_RE, lineno, "label (expected transition=label)")], len(bodies) > 1):
+                if l not in SILENT:
+                    _check_lola_name(l, lineno)
                 label_lines.append((lineno, agent, t, None if l in SILENT else l))
 
         elif section == "arcs":
@@ -267,6 +281,8 @@ def parse(text: str) -> MultiAgentNet:
             raise ParseError(lineno, f"{ctx} connects two {kind[src][0]}s")
         if (src, dst) in a.arcs:
             raise ParseError(lineno, f"{ctx} given twice")
+        if w != VAR and w < 1:
+            raise ParseError(lineno, f"{ctx}: weight must be a positive integer")
         a.arcs[(src, dst)] = w
 
     for lineno, a, p, t in read_lines:
@@ -281,10 +297,12 @@ def parse(text: str) -> MultiAgentNet:
 
     def marking(lines: list[tuple[int, str, int]], ctx: str) -> dict[str, int]:
         m: dict[str, int] = {}
+        seen: set[str] = set()
         for lineno, p, n in lines:
             must_be(lineno, p, "place", None, ctx)
-            if p in m:
+            if p in seen:
                 raise ParseError(lineno, f"{ctx}: {p!r} given twice")
+            seen.add(p)
             if n:
                 m[p] = n
         return m

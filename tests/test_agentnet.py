@@ -39,12 +39,12 @@ class IndexTests(unittest.TestCase):
         net = parse(
             "index: I = 1..2, J = {a, b}, D = 0..1\n"
             "agent: A\n"
-            "  places: home, q[i,j,d] for i in I, j in J, d in D\n"
-            "initial: home=1, q[i,a,0]=2 for i in I\n"
+            "  places: home, q[i][j][d] for i in I, j in J, d in D\n"
+            "initial: home=1, q[i][a][0]=2 for i in I\n"
         )
         self.assertEqual(len(net.agents["A"].places), 1 + 2 * 2 * 2)
-        self.assertEqual(net.agents["A"].places[:3], ["home", "q[1,a,0]", "q[1,a,1]"])
-        self.assertEqual(net.initial, {"home": 1, "q[1,a,0]": 2, "q[2,a,0]": 2})
+        self.assertEqual(net.agents["A"].places[:3], ["home", "q[1][a][0]", "q[1][a][1]"])
+        self.assertEqual(net.initial, {"home": 1, "q[1][a][0]": 2, "q[2][a][0]": 2})
 
     def test_arithmetic_and_product(self):
         net = parse(
@@ -54,15 +54,57 @@ class IndexTests(unittest.TestCase):
             "  transitions: t[i] for i in 1..2\n"
             "  arcs: (p[i], t[i]) (t[i], p[i+1]) for i in 1..2\n"
             "agent: B\n"
-            "  places: q[i,d] for i in I, d in D\n"
+            "  places: q[i][d] for i in I, d in D\n"
         )
         a = net.agents["A"]
         self.assertEqual(a.postset("t[2]"), {"p[3]": 1})
-        self.assertEqual(net.agents["B"].places, ["q[1,x]", "q[1,y]", "q[2,x]", "q[2,y]", "q[3,x]", "q[3,y]"])
+        self.assertEqual(net.agents["B"].places, ["q[1][x]", "q[1][y]", "q[2][x]", "q[2][y]", "q[3][x]", "q[3][y]"])
 
     def test_literal_index_and_spacing(self):
         net = parse("agent: A\n places: p[ 1 ], p[north]\n transitions: t\n arcs: (p[1], t) (t, p[north])")
         self.assertEqual(net.agents["A"].places, ["p[1]", "p[north]"])
+
+    def test_repeated_indices_in_all_sections_and_negative_arithmetic(self):
+        net = parse(
+            "index: I = -1..0, J = {north, south}\n"
+            "agent: A\n"
+            " places: p[i][j] for i in -1..1, j in J\n"
+            " transitions: t[i][j] for i in I, j in J\n"
+            " labels: t[i][j]=go[i][j] for i in I, j in J\n"
+            " arcs: (p[i][j], t[i][j]) (t[i][j], p[i+1][j]) for i in I, j in J\n"
+            " read: (p[ 1 ][j], t[-1][j]) for j in J\n"
+            " initial: p[-1][j]=1 for j in J\n"
+            " final: p[1][j]=1 for j in J\n"
+        )
+        a = net.agents["A"]
+        self.assertEqual(a.postset("t[-1][north]"), {"p[0][north]": 1})
+        self.assertEqual(a.labels["t[0][south]"], "go[0][south]")
+        self.assertIn(("p[1][north]", "t[-1][north]"), a.read_arcs)
+        self.assertEqual(net.initial, {"p[-1][north]": 1, "p[-1][south]": 1})
+        self.assertEqual(net.finals, [{"p[1][north]": 1, "p[1][south]": 1}])
+
+    def test_old_multi_index_syntax_has_migration_error(self):
+        base = "agent: A\n places: p[1][a]\n transitions: t\n"
+        for statement in ["places: q[1,a]", "arcs: (p[1,a], t)", "read: (p[1,a], t)",
+                          "labels: t=go[1,a]", "initial: p[1,a]=1", "final: p[1,a]=1"]:
+            with self.subTest(statement=statement), self.assertRaises(ParseError) as cm:
+                parse(base + statement)
+            self.assertEqual(cm.exception.lineno, 4)
+            self.assertIn("q[i][j]", str(cm.exception))
+
+    def test_missing_for_hint_checks_all_brackets(self):
+        with self.assertRaisesRegex(ParseError, "missing a 'for"):
+            parse("agent: A\n places: p[1][a]\n initial: p[1][j]=1")
+
+    def test_lola_reserved_names_fail_at_declaration_line(self):
+        # Agent type A is valid: only the names exported to LoLA are checked.
+        for name in ["PLACE", "FIREABLE", "TRUE", "oo", "A", "AG", "AGEF", "XX"]:
+            for statement in [f"places: {name}", f"transitions: {name}", f"labels: t={name}"]:
+                with self.subTest(name=name, statement=statement), self.assertRaises(ParseError) as cm:
+                    parse("agent: A\n transitions: t\n" + statement)
+                self.assertEqual(cm.exception.lineno, 3)
+                self.assertIn("reserved", str(cm.exception))
+        self.assertEqual(parse("agent: A\n places: AG[1] place\n").places, ["AG[1]", "place"])
 
 
 class WellFormednessTests(unittest.TestCase):

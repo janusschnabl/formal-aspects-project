@@ -77,6 +77,24 @@ class NetTests(unittest.TestCase):
         self.assertEqual(self.net.transitions, {self.t})
         self.assertEqual(len(self.net.arcs), 3)
         self.assertEqual(self.net.initial_marking, Marking())
+        self.assertEqual(self.net.final_markings, frozenset())
+
+    def test_final_markings_are_exact_and_do_not_stop_firing(self):
+        p, q, t = Place("p"), Place("q"), Transition("t")
+        final = Marking({p: 1})
+        net = PetriNet({p, q}, {t}, {InputArc(p, t), OutputArc(t, q)}, final,
+                       final_markings=[final, Marking(), final])
+        self.assertEqual(net.final_markings, frozenset({final, Marking()}))
+        self.assertTrue(net.is_final(final))
+        self.assertTrue(net.is_final(Marking()))
+        self.assertFalse(net.is_final(Marking({p: 1, q: 1})))
+        self.assertEqual(net.fire(final, t), Marking({q: 1}))
+        self.assertFalse(self.net.is_final(Marking()))
+
+    def test_final_markings_must_be_markings_over_places(self):
+        for finals in [[{self.a: 1}], [Marking({Place("outside"): 1})]]:
+            with self.subTest(finals=finals), self.assertRaises(PetriNetError):
+                PetriNet({self.a}, set(), set(), final_markings=finals)
 
     def test_weight_preset_postset(self):
         self.assertEqual(self.net.weight(self.a, self.t), 2)
@@ -161,6 +179,20 @@ class ParserTests(unittest.TestCase):
 
 
 class ExportTests(unittest.TestCase):
+    def test_invalid_lola_names_are_rejected_without_aliases(self):
+        for name in ["p[1,a]", "p q", "p;q", "p:q", "p(q)", "p{q}",
+                     "PLACE", "FIREABLE", "AG", "oo", "1", "-2", "+", "/*"]:
+            with self.subTest(name=name), self.assertRaises(lola.LolaError):
+                lola.to_lola(PetriNet({Place(name)}, {Transition("t")}, set()))
+        net = PetriNet({Place("p.a[1][-2]")}, {Transition("step.done")}, set())
+        self.assertIn("PLACE p.a[1][-2];", lola.to_lola(net))
+        self.assertIn("TRANSITION step.done", lola.to_lola(net))
+
+    def test_empty_nets_remain_valid_but_cannot_be_exported_to_lola(self):
+        for net in [PetriNet(set(), set(), set()), PetriNet({Place("p")}, set(), set())]:
+            with self.subTest(net=net), self.assertRaises(lola.LolaError):
+                lola.to_lola(net)
+
     def test_to_lola(self):
         net = parse("places: a b\ntransitions: t u\ninitial: a=2\narcs: (a, t, 2) (t, b) (u, a)")
         self.assertEqual(
