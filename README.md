@@ -16,7 +16,10 @@ python -m petrinet examples/agents/example.txt --agentnet --pipeline out/example
 
 This single command parses the agent model, creates its diagram, converts it
 once to a standard Petri net, creates the standard-net diagram, and checks
-that same converted net for dead transitions. It creates `out/` as needed.
+that same converted net for dead transitions. It records and removes all dead
+transitions, then saves and draws the resulting net. The original standard-net
+files are written before Tina runs and preserved for comparison. It creates
+`out/` as needed.
 
 | Output | Contents |
 |---|---|
@@ -24,11 +27,29 @@ that same converted net for dead transitions. It creates `out/` as needed.
 | `out/example.svg` | Converted standard weighted Petri net |
 | `out/example.net` | Converted net in Tina format |
 | `out/example-agent.dot`, `out/example.dot` | Graphviz sources for the diagrams |
+| `out/example-results.json` | Analysis status, dead and removed transition names, and before/after counts |
+| `out/example-pruned.net` | Standard net with all dead transitions and their incident arcs removed |
+| `out/example-pruned.svg`, `out/example-pruned.dot` | Diagram and Graphviz source for the resulting net |
 | Terminal | Dead-transition result; this example prints `No dead transitions.` |
 
 Open the SVG files in a browser to view and zoom. Replace the input filename
 and output prefix with your own, for example `--pipeline out/shop`.
 The `--timeout 60` option limits the Tina analysis to 60 seconds.
+
+Pruning preserves every place, initial marking, final marking, and surviving
+transition's name and arc weights. Places that become isolated remain visible.
+If no transitions are dead, the pruned net is identical to the original, and
+the report's `removed_transitions` list is empty. Removal is based on the
+complete Tina result; the source input file is never edited.
+
+To see removal on the standard example:
+
+```sh
+python -m petrinet examples/two_dead.txt --pipeline out/two_dead
+```
+
+The report lists `t3` and `t4` as removed; `out/two_dead-pruned.svg` shows the
+remaining transitions `t1` and `t2`.
 
 ## Run each step individually
 
@@ -95,10 +116,14 @@ can use stdout at a time. These individual exports can be combined:
 python -m petrinet examples/agents/shop.txt --agentnet --emit shop.net --dot shop.dot --raw-dot shop-agent.dot
 ```
 
-Export commands skip analysis. `--pipeline` adds analysis to the full render
-workflow. Render modes cannot be combined with individual export options.
-Rendering must succeed before any output files are written. If Tina fails
-after a pipeline export, the diagrams and `.net` file remain available.
+Export commands skip analysis. `--pipeline` adds analysis, a removal report,
+and pruned-net exports to the full render workflow. Render modes cannot be
+combined with individual export options. Original diagrams must render
+successfully before their files are written. If Tina or pruned-net rendering
+fails afterward, the original exports remain and the report has status
+`failed`, with an error message. Only a report with status `complete`
+identifies successful pruned outputs for the current run; older pruned files
+from a previous run may still exist after a failure.
 
 ## Input formats
 

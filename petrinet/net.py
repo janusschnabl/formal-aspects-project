@@ -262,6 +262,21 @@ class PetriNet:
         """Whether marking is exactly one of M_F (unlisted places have zero)."""
         return marking in self._final_markings
 
+    def without_transitions(self, transitions: Iterable[Transition]) -> PetriNet:
+        """Return a new net without these transitions and their incident arcs.
+
+        Places and initial/final markings are preserved, including places that
+        become isolated. The caller decides which transitions may be removed.
+        """
+        removed = frozenset(transitions)
+        if not removed <= self.transitions:
+            raise PetriNetError("cannot remove transitions that do not belong to the net")
+        return PetriNet(
+            set(self.places), set(self.transitions - removed),
+            {arc for arc in self.arcs if arc.transition not in removed},
+            self.initial_marking, final_markings=self.final_markings,
+        )
+
     def _check_places_and_transitions(self) -> None:
         names_seen: set[str] = set()
         for place in self._places:

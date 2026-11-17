@@ -3,14 +3,55 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 import sys
 
 from . import agentnet, tina
 from .dot import GraphvizError, render_svg, to_agent_dot, to_dot
-from .net import PetriNetError
+from .net import PetriNet, PetriNetError
 from .parser import ParseError, load
+
+
+def _prune_pipeline(net: PetriNet, args, labels):
+    """Analyze after the original exports exist, then save the pruned net."""
+    report_path = Path(f"{args.pipeline}-results.json")
+    report = {
+        "status": "checking", "input": args.net,
+        "before": {"places": len(net.places), "transitions": len(net.transitions), "arcs": len(net.arcs)},
+        "dead_transitions": None, "removed_transitions": None,
+    }
+
+    def write_report():
+        report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+
+    write_report()
+    try:
+        dead = tina.dead_transitions(net, args.tina, args.timeout)
+        pruned = net.without_transitions(dead)
+        report["dead_transitions"] = [t.name for t in sorted(dead)]
+        report["after"] = {"places": len(pruned.places), "transitions": len(pruned.transitions), "arcs": len(pruned.arcs)}
+        pruned_dot = to_dot(pruned, transition_labels=labels)
+        # Finish rendering before replacing any previous pruned artifacts.
+        pruned_svg = render_svg(pruned_dot, graphviz_bin=args.graphviz)
+        files = {
+            f"{args.pipeline}-pruned.net": tina.to_tina(pruned),
+            f"{args.pipeline}-pruned.dot": pruned_dot,
+            f"{args.pipeline}-pruned.svg": pruned_svg,
+        }
+        for destination, content in files.items():
+            Path(destination).write_text(content, encoding="utf-8")
+        report["status"] = "complete"
+        report["removed_transitions"] = report["dead_transitions"]
+        report["pruned_files"] = list(files)
+        write_report()
+        return dead
+    except (OSError, PetriNetError, tina.TinaError, GraphvizError) as e:
+        report["status"] = "failed"
+        report["error"] = str(e)
+        write_report()
+        raise
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -20,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--emit", "--emit-tina", dest="emit", metavar="FILE", help="write the Tina .net translation to FILE ('-' for stdout) and exit")
     ap.add_argument("--dot", metavar="FILE", help="write the standard net as Graphviz DOT and exit ('-' for stdout)")
     ap.add_argument("--raw-dot", metavar="FILE", help="write raw agent nets as DOT; requires --agentnet")
-    ap.add_argument("--pipeline", metavar="PREFIX", help="render agent and standard nets, export Tina .net, then print dead transitions")
+    ap.add_argument("--pipeline", metavar="PREFIX", help="draw original nets, check with Tina, report removed dead transitions, then export and draw the pruned net")
     ap.add_argument("--raw-render", metavar="PREFIX", help="parse and draw only the agent model as DOT and SVG; requires --agentnet")
     ap.add_argument("--render", metavar="PREFIX", help="export Tina .net, DOT, and SVG files using PREFIX; also raw-agent diagrams with --agentnet")
     ap.add_argument("--graphviz", default="dot", metavar="PATH", help="Graphviz dot executable for --render (default: dot)")
@@ -95,7 +136,8 @@ def main(argv: list[str] | None = None) -> int:
         if outputs and args.pipeline is None:
             return 0
 
-        dead = tina.dead_transitions(net, args.tina, args.timeout)
+        dead = (_prune_pipeline(net, args, labels) if args.pipeline is not None
+                else tina.dead_transitions(net, args.tina, args.timeout))
     except (OSError, ParseError, agentnet.ParseError, agentnet.ConversionError, PetriNetError,
             tina.TinaError, GraphvizError) as e:
         print(f"error: {e}", file=sys.stderr)

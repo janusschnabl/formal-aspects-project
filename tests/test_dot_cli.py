@@ -1,5 +1,6 @@
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
+import json
 import os
 from pathlib import Path
 import shutil
@@ -94,6 +95,12 @@ class CliTests(unittest.TestCase):
                 mock.patch("petrinet.__main__.agentnet.convert", wraps=agentnet.convert) as convert, \
                 mock.patch("petrinet.__main__.tina.dead_transitions", return_value=[]) as check:
             prefix = Path(tmp) / "new folder" / "example"
+            def verify_original_before_check(net, *args):
+                self.assertTrue(Path(f"{prefix}.net").exists())
+                self.assertTrue(Path(f"{prefix}.svg").exists())
+                self.assertFalse(Path(f"{prefix}-pruned.net").exists())
+                return []
+            check.side_effect = verify_original_before_check
             self.assertEqual(run_cli([os.path.join(EXAMPLES, "example.txt"), "--agentnet",
                                       "--pipeline", str(prefix), "--timeout", "10"]),
                              (0, "No dead transitions.\n", ""))
@@ -103,7 +110,38 @@ class CliTests(unittest.TestCase):
             from petrinet.tina import to_tina
             self.assertEqual(Path(f"{prefix}.net").read_text(encoding="utf-8"), to_tina(check.call_args.args[0]))
             self.assertEqual(check.call_args.args[1:], (None, 10))
-            self.assertEqual(len(list(prefix.parent.iterdir())), 5)
+            self.assertEqual(len(list(prefix.parent.iterdir())), 9)
+            report = json.loads(Path(f"{prefix}-results.json").read_text())
+            self.assertEqual(report["status"], "complete")
+            self.assertEqual(report["removed_transitions"], [])
+            self.assertEqual(report["before"], report["after"])
+
+    def test_failed_check_overwrites_previous_success_report(self):
+        from petrinet.tina import TinaError
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch("petrinet.__main__.render_svg", return_value="<svg/>"), \
+                mock.patch("petrinet.__main__.tina.dead_transitions", side_effect=[[], TinaError("timed out")]):
+            prefix = Path(tmp) / "example"
+            args = [os.path.join(EXAMPLES, "example.txt"), "--agentnet", "--pipeline", str(prefix)]
+            self.assertEqual(run_cli(args)[0], 0)
+            self.assertEqual(run_cli(args), (2, "", "error: timed out\n"))
+            report = json.loads(Path(f"{prefix}-results.json").read_text())
+            self.assertEqual(report["status"], "failed")
+            self.assertIsNone(report["removed_transitions"])
+            self.assertEqual(report["error"], "timed out")
+
+    def test_pruned_render_failure_leaves_original_and_records_failure(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch("petrinet.__main__.render_svg", side_effect=["<svg/>", GraphvizError("pruned render failed")]), \
+                mock.patch("petrinet.__main__.tina.dead_transitions", return_value=[Transition("t3"), Transition("t4")]):
+            prefix = Path(tmp) / "example"
+            source = os.path.join(os.path.dirname(__file__), "nets", "two_dead.txt")
+            self.assertEqual(run_cli([source, "--pipeline", str(prefix)])[0], 2)
+            self.assertTrue(Path(f"{prefix}.svg").exists())
+            self.assertFalse(Path(f"{prefix}-pruned.net").exists())
+            report = json.loads(Path(f"{prefix}-results.json").read_text())
+            self.assertEqual(report["status"], "failed")
+            self.assertIsNone(report["removed_transitions"])
 
     def test_raw_render_skips_conversion_and_analysis(self):
         with tempfile.TemporaryDirectory() as tmp, \
@@ -289,6 +327,22 @@ class RealGraphvizTests(unittest.TestCase):
             standard = os.path.join(os.path.dirname(__file__), "nets", "two_dead.txt")
             self.assertEqual(run_cli([standard, "--pipeline", str(Path(tmp) / "two_dead")]),
                              (0, "Dead transitions:\n  t3\n  t4\n", ""))
+            report = json.loads((Path(tmp) / "two_dead-results.json").read_text())
+            self.assertEqual(report["removed_transitions"], ["t3", "t4"])
+            self.assertEqual(report["before"]["transitions"], 4)
+            self.assertEqual(report["after"]["transitions"], 2)
+            pruned_text = (Path(tmp) / "two_dead-pruned.net").read_text()
+            self.assertIn("tr {t1}", pruned_text)
+            self.assertNotIn("tr {t3}", pruned_text)
+            self.assertNotIn("tr {t4}", pruned_text)
+            self.assertEqual(ElementTree.parse(Path(tmp) / "two_dead-pruned.svg").getroot().tag,
+                             "{http://www.w3.org/2000/svg}svg")
+            all_dead_source = Path(EXAMPLES).parent / "simple.txt"
+            self.assertEqual(run_cli([str(all_dead_source), "--pipeline", str(Path(tmp) / "all_dead")])[0], 0)
+            report = json.loads((Path(tmp) / "all_dead-results.json").read_text())
+            self.assertEqual(report["after"]["transitions"], 0)
+            self.assertEqual(report["after"]["arcs"], 0)
+            self.assertNotIn("tr ", (Path(tmp) / "all_dead-pruned.net").read_text())
 
     def test_cli_pipeline_creates_both_svgs(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -193,6 +193,44 @@ class ExportTests(unittest.TestCase):
 
 
 class BuiltinTests(unittest.TestCase):
+    def test_removing_dead_transitions_preserves_behavior_and_metadata(self):
+        net = load_example()
+        before = (net.transitions, net.arcs)
+        dead = explore.dead_transitions(net)
+        pruned = net.without_transitions(dead)
+        self.assertEqual(pruned.transitions, {Transition("t1"), Transition("t2")})
+        self.assertEqual(len(pruned.arcs), 4)
+        self.assertEqual(pruned.places, net.places)
+        self.assertEqual(pruned.initial_marking, net.initial_marking)
+        self.assertEqual(pruned.final_markings, net.final_markings)
+        self.assertEqual((net.transitions, net.arcs), before)
+
+        def reachable(model):
+            seen, pending = {model.initial_marking}, [model.initial_marking]
+            while pending:
+                marking = pending.pop()
+                for t in model.enabled_transitions(marking):
+                    successor = model.fire(marking, t)
+                    if successor not in seen:
+                        seen.add(successor)
+                        pending.append(successor)
+            return seen
+
+        self.assertEqual(reachable(pruned), reachable(net))
+        self.assertEqual(explore.dead_transitions(pruned), [])
+
+    def test_removal_handles_all_or_no_transitions_and_preserves_finals(self):
+        p, q, t = Place("p"), Place("q"), Transition("t")
+        net = PetriNet({p, q}, {t}, {InputArc(p, t), OutputArc(t, q)}, final_markings=[Marking({q: 1})])
+        empty = net.without_transitions({t})
+        self.assertFalse(empty.transitions)
+        self.assertFalse(empty.arcs)
+        self.assertEqual(empty.places, net.places)
+        self.assertEqual(empty.final_markings, net.final_markings)
+        self.assertEqual(net.without_transitions([]).arcs, net.arcs)
+        with self.assertRaises(PetriNetError):
+            net.without_transitions([Transition("outside")])
+
     def test_example(self):
         self.assertEqual(explore.dead_transitions(load_example()), [Transition("t3"), Transition("t4")])
 
