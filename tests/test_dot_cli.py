@@ -34,8 +34,8 @@ class DotTests(unittest.TestCase):
         text = to_dot(result.net, transition_labels=labels)
         self.assertIn('shape="circle"', text)
         self.assertIn('shape="box"', text)
-        self.assertIn('xlabel="p[-1][north]"', text)
-        self.assertIn('xlabel="p[0][north]"', text)
+        self.assertIn('label="p[-1][north]\\n2"', text)
+        self.assertIn('label="p[0][north]"', text)
         self.assertIn('label="2"', text)
         self.assertIn('label="go[-1][north]\\nA.move[-1][north]=2"', text)
         self.assertIn('Final markings (unlisted places = 0):\\n{p[0][north]=2}\\n{}', text)
@@ -52,7 +52,7 @@ class DotTests(unittest.TestCase):
         self.assertIn('label="sell[1]\\nlabel: serve[1]"', raw)
         self.assertIn('style="dashed", label="read"', raw)
         self.assertIn('label="*"', raw)
-        self.assertIn('xlabel="open[1]"', raw)
+        self.assertIn('label="open[1]\\n1"', raw)
         self.assertIn("Same non-silent label = synchronized firing", raw)
         self.assertIn("home=3", raw)
         self.assertNotIn("__k_", raw)
@@ -62,13 +62,13 @@ class DotTests(unittest.TestCase):
         source = agentnet.parse(INDEXED)
         raw = to_agent_dot(source)
         for name in source.places:
-            self.assertIn(f'xlabel="{name}"', raw)
+            self.assertIn(f'label="{name}', raw)
         self.assertIn("move[-1][north]", raw)
 
     def test_empty_and_isolated_nodes_are_kept(self):
         self.assertTrue(to_dot(PetriNet(set(), set(), set())).startswith("digraph net {"))
         net = PetriNet({Place("alone")}, {Transition("idle")}, set())
-        self.assertIn('xlabel="alone"', to_dot(net))
+        self.assertIn('label="alone"', to_dot(net))
         self.assertIn('label="idle"', to_dot(net))
         source = agentnet.parse("agent: A\n places: p\n transitions: t")
         self.assertIn('label="t\\nsilent"', to_agent_dot(source))
@@ -76,12 +76,12 @@ class DotTests(unittest.TestCase):
     def test_quotes_backslashes_and_newlines_are_escaped(self):
         p = Place('p"\\\nq')
         text = to_dot(PetriNet({p}, set(), set()))
-        self.assertIn('xlabel="p\\"\\\\\\nq"', text)
+        self.assertIn('label="p\\"\\\\\\nq"', text)
 
     def test_diagram_can_show_another_marking_without_changing_the_net(self):
         p = Place("p")
         net = PetriNet({p}, set(), set())
-        self.assertIn('label="3"', to_dot(net, marking=Marking({p: 3})))
+        self.assertIn('label="p\\n3"', to_dot(net, marking=Marking({p: 3})))
         self.assertEqual(net.initial_marking[p], 0)
         with self.assertRaises(PetriNetError):
             to_dot(net, marking=Marking({Place("outside"): 1}))
@@ -129,6 +129,21 @@ class CliTests(unittest.TestCase):
             self.assertEqual(report["status"], "failed")
             self.assertIsNone(report["removed_transitions"])
             self.assertEqual(report["error"], "timed out")
+
+    def test_parse_failure_cannot_leave_previous_report_claiming_success(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch("petrinet.__main__.render_svg", return_value="<svg/>"), \
+                mock.patch("petrinet.__main__.tina.dead_transitions", return_value=[]):
+            source = Path(tmp) / "source.txt"
+            source.write_text("places: p\ntransitions: t\narcs: (p, t)\n", encoding="utf-8")
+            prefix = Path(tmp) / "output" / "example"
+            args = [str(source), "--pipeline", str(prefix)]
+            self.assertEqual(run_cli(args)[0], 0)
+            source.write_text("not a valid net", encoding="utf-8")
+            self.assertEqual(run_cli(args)[0], 2)
+            report = json.loads(Path(f"{prefix}-results.json").read_text())
+            self.assertEqual(report["status"], "failed")
+            self.assertIsNone(report["removed_transitions"])
 
     def test_pruned_render_failure_leaves_original_and_records_failure(self):
         with tempfile.TemporaryDirectory() as tmp, \
@@ -242,7 +257,7 @@ class CliTests(unittest.TestCase):
             convert.assert_called_once()
             check.assert_not_called()
             self.assertEqual(tina_file.read_text(encoding="utf-8").count("tr "), 12)
-            self.assertIn('xlabel="open[1]"', dot_file.read_text(encoding="utf-8"))
+            self.assertIn('label="open[1]\\n1"', dot_file.read_text(encoding="utf-8"))
             self.assertIn("Customer.enter=3", dot_file.read_text(encoding="utf-8"))
             self.assertIn('label="*"', raw_file.read_text(encoding="utf-8"))
 
@@ -304,7 +319,7 @@ class CliTests(unittest.TestCase):
         path = os.path.join(os.path.dirname(__file__), "nets", "two_dead.txt")
         status, out, err = run_cli([path, "--dot", "-"])
         self.assertEqual((status, err), (0, ""))
-        self.assertIn('xlabel="p1"', out)
+        self.assertIn('label="p1\\n1"', out)
 
     def test_converted_net_uses_tina_by_default(self):
         path = os.path.join(EXAMPLES, "shop.txt")

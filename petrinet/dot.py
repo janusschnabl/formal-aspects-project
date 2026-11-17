@@ -88,8 +88,10 @@ def to_dot(
     ids: dict[Place | Transition, str] = {}
     for i, p in enumerate(sorted(net.places)):
         ids[p] = f"p{i}"
-        writer.node(ids[p], shape="circle", label=str(marking[p]) if marking[p] else "",
-                    xlabel=place_labels.get(p, p.name))
+        # The older Graphviz bundled with Tina ignores xlabel. Keep the name
+        # and marking in a normal label so every supported renderer shows them.
+        name = place_labels.get(p, p.name)
+        writer.node(ids[p], shape="circle", label=f"{name}\n{marking[p]}" if marking[p] else name)
     for i, t in enumerate(sorted(net.transitions)):
         ids[t] = f"t{i}"
         writer.node(ids[t], shape="box", label=transition_labels.get(t, t.name))
@@ -113,7 +115,7 @@ def to_agent_dot(net: MultiAgentNet) -> str:
         for j, p in enumerate(sorted(agent.places)):
             ids[p] = f"a{i}_p{j}"
             count = net.initial.get(p, 0)
-            writer.node(ids[p], shape="circle", label=str(count) if count else "", xlabel=p)
+            writer.node(ids[p], shape="circle", label=f"{p}\n{count}" if count else p)
         for j, t in enumerate(sorted(agent.transitions)):
             ids[t] = f"a{i}_t{j}"
             label = agent.label(t)

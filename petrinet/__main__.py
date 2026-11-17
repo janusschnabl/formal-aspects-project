@@ -99,6 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     if destinations.count("-") > 1:
         ap.error("at most one export can use stdout ('-')")
 
+    pipeline_check_started = False
     try:
         paths = [os.path.normcase(str(Path(d).resolve())) for d in destinations if d != "-"]
         if len(set(paths)) != len(paths):
@@ -136,10 +137,23 @@ def main(argv: list[str] | None = None) -> int:
         if outputs and args.pipeline is None:
             return 0
 
+        pipeline_check_started = args.pipeline is not None
         dead = (_prune_pipeline(net, args, labels) if args.pipeline is not None
                 else tina.dead_transitions(net, args.tina, args.timeout))
     except (OSError, ParseError, agentnet.ParseError, agentnet.ConversionError, PetriNetError,
             tina.TinaError, GraphvizError) as e:
+        if args.pipeline is not None and not pipeline_check_started:
+            # A failed rerun must not leave the previous run's success report
+            # claiming that the old pruned artifacts belong to this input.
+            report_path = Path(f"{args.pipeline}-results.json")
+            if report_path.is_file():
+                try:
+                    report_path.write_text(json.dumps({
+                        "status": "failed", "input": args.net, "error": str(e),
+                        "dead_transitions": None, "removed_transitions": None,
+                    }, indent=2) + "\n", encoding="utf-8")
+                except OSError:
+                    pass  # Preserve the original error if the report is unwritable.
         print(f"error: {e}", file=sys.stderr)
         return 2
 
