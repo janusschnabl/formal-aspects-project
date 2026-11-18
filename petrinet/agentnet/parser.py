@@ -330,7 +330,7 @@ def parse(text: str) -> MultiAgentNet:
     return MultiAgentNet(
         agents=agents,
         initial=marking(initial_lines, "initial marking"),
-        finals=[marking(f, "final marking") for f in final_lines],
+        finals=[marking(f, "final marking", keep_zeros=True) for f in final_lines],
         unrestricted_finals=[marking(f, "unrestricted final marking", keep_zeros=True) for f in unrestricted_final_lines],
         ctl_properties=ctl_properties,
     )

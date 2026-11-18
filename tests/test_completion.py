@@ -153,6 +153,7 @@ class CompletionTests(unittest.TestCase):
         self.assertEqual(tina.verify_properties(net, timeout=15), {
             "completion": None, "deadlocks": {"reachable": True, "non_final_reachable": True},
             "properties": {"safe": True, "no_final": False},
+            "agent_completion": {},
         })
         invalid = parse("places: p\nctl: bad = AG UnknownPlace\n")
         with self.assertRaisesRegex(tina.TinaError, "Muse CTL results"):
@@ -264,6 +265,7 @@ class CompletionTests(unittest.TestCase):
                 self.assertEqual(report["dead_transitions"], ["dead"])
                 self.assertIsNone(report["removed_transitions"])
                 self.assertIsNone(report["completion"])
+                self.assertIsNone(report["agent_completion"])
                 self.assertIsNone(report["deadlocks"])
                 self.assertNotIn("pruned_files", report)
                 self.assertTrue(report["error"])

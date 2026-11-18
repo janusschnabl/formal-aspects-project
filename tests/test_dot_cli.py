@@ -97,6 +97,8 @@ class CliTests(unittest.TestCase):
                 mock.patch("petrinet.__main__.tina.verify_properties", return_value={
                     "completion": {"option_to_complete": True, "all_traces_complete": True},
                     "deadlocks": {"reachable": True, "non_final_reachable": False}, "properties": {},
+                    "agent_completion": {name: {"can_complete": True, "all_traces_complete": True}
+                                         for name in ["Janus", "Thomas"]},
                 }) as verification:
             prefix = Path(tmp) / "new folder" / "example"
             def verify_original_before_check(net, *args):
@@ -110,11 +112,16 @@ class CliTests(unittest.TestCase):
                              (0, "No dead transitions.\n"
                               "Reachable deadlock: yes\nReachable non-final deadlock: no\n"
                               "Option to complete from every reachable marking: yes\n"
-                              "All traces eventually reach a final marking: yes\n", ""))
+                              "All traces eventually reach a final marking: yes\n"
+                              "Agent Janus: can eventually complete: yes\nAgent Janus: always completes: yes\n"
+                              "Agent Thomas: can eventually complete: yes\nAgent Thomas: always completes: yes\n", ""))
             load.assert_called_once()
             convert.assert_called_once()
             check.assert_called_once()
-            verification.assert_called_once_with(check.call_args.args[0], None, 10)
+            verification.assert_called_once_with(check.call_args.args[0], None, 10, agent_final_clauses={
+                "Janus": ({Place("hjem1"): 0, Place("uni1"): 1},),
+                "Thomas": ({Place("hjem2"): 0, Place("uni2"): 1},),
+            })
             from petrinet.tina import to_tina
             self.assertEqual(Path(f"{prefix}.net").read_text(encoding="utf-8"), to_tina(check.call_args.args[0]))
             self.assertEqual(check.call_args.args[1:], (None, 10))
@@ -352,7 +359,9 @@ class RealGraphvizTests(unittest.TestCase):
                              (0, "No dead transitions.\n"
                               "Reachable deadlock: yes\nReachable non-final deadlock: no\n"
                               "Option to complete from every reachable marking: yes\n"
-                              "All traces eventually reach a final marking: yes\n", ""))
+                              "All traces eventually reach a final marking: yes\n"
+                              "Agent Janus: can eventually complete: yes\nAgent Janus: always completes: yes\n"
+                              "Agent Thomas: can eventually complete: yes\nAgent Thomas: always completes: yes\n", ""))
             for suffix in [".svg", "-agent.svg"]:
                 self.assertEqual(ElementTree.parse(f"{prefix}{suffix}").getroot().tag,
                                  "{http://www.w3.org/2000/svg}svg")

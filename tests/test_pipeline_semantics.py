@@ -18,7 +18,7 @@ from xml.etree import ElementTree as ET
 
 from petrinet import Marking, Place
 from petrinet import agentnet, tina
-from tests.ctl_reference import expected_verification
+from tests.ctl_reference import expected_verification, satisfying_states
 from tests.test_conversion import INDEXED, PAIRS
 
 
@@ -133,6 +133,24 @@ def reference_is_final(source, tokens):
     return (any(all(tokens[p] == final.get(p, 0) for p in tokens) for final in source.finals)
             or any(all(tokens[p] == count for p, count in clause.items())
                    for clause in source.unrestricted_finals))
+
+
+def reference_agent_finals(source, agent, states):
+    """Infer local acceptance directly from explicit source declarations."""
+    places = set(agent.places)
+    exact = [final for final in source.finals if places.intersection(final)]
+    partial = [{p: n for p, n in final.items() if p in places}
+               for final in source.unrestricted_finals if places.intersection(final)]
+    if not exact and not partial:
+        return None
+    names = sorted(source.places)
+    finals = set()
+    for state in states:
+        tokens = dict(zip(names, state))
+        if (any(all(tokens[p] == final.get(p, 0) for p in places) for final in exact)
+                or any(all(tokens[p] == n for p, n in final.items()) for final in partial)):
+            finals.add(state)
+    return finals
 
 
 class ExhaustiveConstructionTests(unittest.TestCase):
@@ -274,6 +292,14 @@ class RealPipelineAuditTests(unittest.TestCase):
                     tuple(source.initial.get(p, 0) for p in names), finals,
                     bool(source.finals or source.unrestricted_finals),
                 )
+                edges = {(before, after) for before, _, _, after in source_edges}
+                initial = tuple(source.initial.get(p, 0) for p in names)
+                for agent_name, agent in source.agents.items():
+                    local_finals = reference_agent_finals(source, agent, states)
+                    expected["agent_completion"][agent_name] = None if local_finals is None else {
+                        "can_complete": initial in satisfying_states(states, edges, {"final": local_finals}, ("EF", "final")),
+                        "all_traces_complete": initial in satisfying_states(states, edges, {"final": local_finals}, ("AF", "final")),
+                    }
                 expected_dead = sorted(t.name for t, o in construction.transition_origins.items()
                                        if (tuple(sorted(o.global_transition.members)), o.multiplicities) not in fired)
                 if name == "mixed":
@@ -292,6 +318,13 @@ class RealPipelineAuditTests(unittest.TestCase):
                 self.assertTrue(proc.stdout.startswith(expected_stdout), proc.stdout)
                 for section, verdicts in expected.items():
                     self.assertEqual(report[section], verdicts, (name, section))
+                for agent_name, local in expected["agent_completion"].items():
+                    if local is None:
+                        self.assertIn(f"Agent {agent_name}: completion not checked: no explicit final declarations.", proc.stdout)
+                    else:
+                        for key, label in [("can_complete", "can eventually complete"),
+                                           ("all_traces_complete", "always completes")]:
+                            self.assertIn(f"Agent {agent_name}: {label}: " + ("yes" if local[key] else "no"), proc.stdout)
                 for key, label in [("reachable", "Reachable deadlock"),
                                    ("non_final_reachable", "Reachable non-final deadlock")]:
                     self.assertIn(f"{label}: " + ("yes" if expected["deadlocks"][key] else "no"), proc.stdout)

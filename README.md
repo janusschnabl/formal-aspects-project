@@ -87,6 +87,12 @@ The pipeline reports:
 - **Completion:** whether a final remains reachable from every reachable marking,
   and whether every execution eventually reaches a final.
 
+With `--agentnet`, completion is also reported per type: **can eventually
+complete** and **always completes**. Local finals use explicit entries for
+that type; types with no entries are reported as unspecified.
+See [how local finals become CTL checks](agents/completion.md) for a worked
+example, including the zero checks for omitted places.
+
 A loop can prevent eventual completion even when an exit exists. Final
 markings do not stop firing.
 

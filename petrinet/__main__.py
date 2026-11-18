@@ -14,7 +14,7 @@ from .net import PetriNet, PetriNetError
 from .parser import ParseError, load
 
 
-def _prune_pipeline(net: PetriNet, args, labels):
+def _prune_pipeline(net: PetriNet, args, labels, agent_final_clauses=None):
     """Analyze after the original exports exist, then save the pruned net."""
     report_path = Path(f"{args.pipeline}-results.json")
     report = {
@@ -22,6 +22,7 @@ def _prune_pipeline(net: PetriNet, args, labels):
         "before": {"places": len(net.places), "transitions": len(net.transitions), "arcs": len(net.arcs)},
         "dead_transitions": None, "removed_transitions": None,
         "completion": None,
+        "agent_completion": None,
         "deadlocks": None,
         "properties": {},
     }
@@ -33,7 +34,8 @@ def _prune_pipeline(net: PetriNet, args, labels):
     try:
         dead = tina.dead_transitions(net, args.tina, args.timeout)
         report["dead_transitions"] = [t.name for t in sorted(dead)]
-        verification = tina.verify_properties(net, args.tina, args.timeout)
+        verification = tina.verify_properties(net, args.tina, args.timeout,
+                                              agent_final_clauses=agent_final_clauses)
         report.update(verification)
         pruned = net.without_transitions(dead)
         report["after"] = {"places": len(pruned.places), "transitions": len(pruned.transitions), "arcs": len(pruned.arcs)}
@@ -51,7 +53,7 @@ def _prune_pipeline(net: PetriNet, args, labels):
         report["removed_transitions"] = report["dead_transitions"]
         report["pruned_files"] = list(files)
         write_report()
-        return dead, verification
+        return dead, report
     except (OSError, PetriNetError, tina.TinaError, GraphvizError) as e:
         report["status"] = "failed"
         report["error"] = str(e)
@@ -144,7 +146,9 @@ def main(argv: list[str] | None = None) -> int:
 
         pipeline_check_started = args.pipeline is not None
         if args.pipeline is not None:
-            dead, verification = _prune_pipeline(net, args, labels)
+            dead, verification = _prune_pipeline(
+                net, args, labels, None if result is None else result.agent_final_clauses,
+            )
         else:
             dead = tina.dead_transitions(net, args.tina, args.timeout)
     except (OSError, ParseError, agentnet.ParseError, agentnet.ConversionError, PetriNetError,
@@ -180,6 +184,12 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print("Option to complete from every reachable marking: " + ("yes" if completion["option_to_complete"] else "no"))
             print("All traces eventually reach a final marking: " + ("yes" if completion["all_traces_complete"] else "no"))
+        for name, local in (verification["agent_completion"] or {}).items():
+            if local is None:
+                print(f"Agent {name}: completion not checked: no explicit final declarations.")
+            else:
+                print(f"Agent {name}: can eventually complete: " + ("yes" if local["can_complete"] else "no"))
+                print(f"Agent {name}: always completes: " + ("yes" if local["all_traces_complete"] else "no"))
         for name, holds in verification["properties"].items():
             print(f"CTL {name}: " + ("yes" if holds else "no"))
     return 0

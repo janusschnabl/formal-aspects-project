@@ -70,4 +70,5 @@ def expected_verification(states, edges, initial, finals, has_finals):
             "non_final_reachable": holds(("EF", ("and", "deadlock", ("not", "final")))),
         },
         "properties": {},
+        "agent_completion": {},
     }

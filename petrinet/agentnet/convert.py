@@ -40,6 +40,7 @@ class ConversionResult:
     net: PetriNet
     place_map: dict[str, Place]
     transition_origins: dict[Transition, TransitionOrigin]
+    agent_final_clauses: dict[str, tuple[dict[Place, int], ...]]
 
 
 def _name(name: str) -> None:
@@ -156,10 +157,21 @@ def convert(source: MultiAgentNet) -> ConversionResult:
     def marking(tokens: dict[str, int]) -> Marking:
         return Marking({place_map[p]: n for p, n in tokens.items()})
 
+    agent_final_clauses = {}
+    for name, agent in sorted(source.agents.items()):
+        places = set(agent.places)
+        # Only an explicit entry establishes a local final for this type.
+        # Exact finals then constrain all its places, including omitted zeros.
+        clauses = [{place_map[p]: final.get(p, 0) for p in sorted(places)}
+                   for final in source.finals if places.intersection(final)]
+        clauses.extend({place_map[p]: n for p, n in final.items() if p in places}
+                       for final in source.unrestricted_finals if places.intersection(final))
+        agent_final_clauses[name] = tuple(clauses)
+
     net = PetriNet(
         set(place_map.values()), transitions, arcs, marking(source.initial),
         final_markings=[marking(m) for m in source.finals],
         unrestricted_final_markings=[{place_map[p]: n for p, n in m.items()} for m in source.unrestricted_finals],
         ctl_properties=source.ctl_properties,
     )
-    return ConversionResult(net, place_map, origins)
+    return ConversionResult(net, place_map, origins, agent_final_clauses)

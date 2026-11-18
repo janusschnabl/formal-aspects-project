@@ -35,10 +35,14 @@ User properties need only a `ctl: name = formula` line.
 | `completion` | `option_to_complete`, `all_traces_complete`; `None` without finals |
 | `deadlocks` | `reachable`, `non_final_reachable` |
 | `properties` | User property names mapped to booleans |
+| `agent_completion` | Per-type `can_complete` and `all_traces_complete`; `None` per type without local finals |
 
 `check_completion()` and `check_deadlocks()` run only their respective group.
 The default CLI without export flags checks only dead transitions; the full
 verification runs under `--pipeline`.
+
+See [Per-type completion checks](completion.md) for final-clause inference,
+implicit zero constraints, generated EF/AF queries, and the code path.
 
 Semantics to preserve:
 
@@ -95,3 +99,7 @@ covered separately. Upstream manuals are under `tools/tina/4.0.0/`.
   extending verification.
 - `test_final_input.py` checks exact/partial final declarations and preservation
   through conversion and pruning.
+- `test_agent_completion.py` checks explicit final inference, zero entries,
+  missing local finals, alternative finals, synchronization, and global
+  interleaving effects on EF/AF. The pipeline audit independently checks these
+  verdicts against the source graph.

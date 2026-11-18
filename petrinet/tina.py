@@ -17,12 +17,20 @@ import subprocess
 import sys
 import tempfile
 import time
+from typing import TypedDict
 
-from .net import PetriNet, Transition
+from .net import PetriNet, Place, Transition
 
 
 class TinaError(RuntimeError):
     pass
+
+
+class VerificationResults(TypedDict):
+    completion: dict[str, bool] | None
+    deadlocks: dict[str, bool]
+    properties: dict[str, bool]
+    agent_completion: dict[str, dict[str, bool] | None]
 
 
 _BUNDLED_ROOT = Path(__file__).resolve().parent.parent / "tools" / "tina" / "4.0.0"
@@ -30,6 +38,10 @@ _BUNDLED_ROOT = Path(__file__).resolve().parent.parent / "tools" / "tina" / "4.0
 _COMPLETION_PROPERTIES = {
     "option_to_complete": "AG (EF IsFinal)",
     "all_traces_complete": "AF IsFinal",
+}
+_AGENT_COMPLETION_PROPERTIES = {
+    "can_complete": "EF IsFinal",
+    "all_traces_complete": _COMPLETION_PROPERTIES["all_traces_complete"],
 }
 _DEADLOCK_PROPERTIES = {
     "reachable": "EF IsDeadlock",
@@ -169,10 +181,8 @@ def dead_transitions(net: PetriNet, tina_bin: str | None = None, timeout: float 
             return _parse_result(stream, net)
 
 
-def _check_ctl(net: PetriNet, expressions: list[str], tina_bin: str | None, timeout: float | None) -> list[bool]:
-    """Evaluate CTL expressions at the initial state of Tina's full graph."""
-    clauses = [{p: marking[p] for p in net.places} for marking in net.final_markings]
-    clauses.extend(net.unrestricted_final_markings)
+def _final_expression(clauses: Iterable[Mapping[Place, int]]) -> str:
+    """Build a state predicate for a union of explicit place constraints."""
     terms = []
     for clause in clauses:
         constraints = []
@@ -181,7 +191,14 @@ def _check_ctl(net: PetriNet, expressions: list[str], tina_bin: str | None, time
             name = p.name if re.fullmatch(r"[A-Za-z0-9_']+", p.name) else _identifier(p.name)
             constraints.append(f"(S.{name} = {count})")
         terms.append("(" + " /\\ ".join(constraints) + ")" if constraints else "T:S")
-    final = " \\/ ".join(sorted(terms)) or "F:S"
+    return " \\/ ".join(sorted(terms)) or "F:S"
+
+
+def _check_ctl(net: PetriNet, expressions: list[str], tina_bin: str | None, timeout: float | None) -> list[bool]:
+    """Evaluate CTL expressions at the initial state of Tina's full graph."""
+    clauses = [{p: marking[p] for p in net.places} for marking in net.final_markings]
+    clauses.extend(net.unrestricted_final_markings)
+    final = _final_expression(clauses)
 
     executable = resolve_executable(tina_bin)
     binary = Path(shutil.which(executable) or executable).resolve()
@@ -254,16 +271,29 @@ def check_deadlocks(net: PetriNet, tina_bin: str | None = None, timeout: float |
 
 def verify_properties(
     net: PetriNet, tina_bin: str | None = None, timeout: float | None = None,
-) -> dict[str, dict[str, bool] | None]:
-    """Return completion, deadlocks, and named properties in one Muse session.
+    *, agent_final_clauses: Mapping[str, Iterable[Mapping[Place, int]]] | None = None,
+) -> VerificationResults:
+    """Check global and per-type completion on one global reachability graph.
 
-    Each section maps property names to booleans; completion is None when no
-    final declarations exist. The returned sections can be written to JSON.
+    Per-type completion uses EF and AF of the inferred local final predicate.
+    A type with no explicit final clauses has a None result.
     """
     has_finals = bool(net.final_markings or net.unrestricted_final_markings)
-    results = _check_groups(net, {
+    groups = {
         "completion": _COMPLETION_PROPERTIES if has_finals else {},
         "deadlocks": _DEADLOCK_PROPERTIES,
         "properties": net.ctl_properties,
-    }, tina_bin, timeout)
-    return {**results, "completion": results["completion"] if has_finals else None}
+    }
+    local_finals = {name: tuple(clauses) for name, clauses in sorted((agent_final_clauses or {}).items())}
+    for name, clauses in local_finals.items():
+        if clauses:
+            final = "(" + _final_expression(clauses) + ")"
+            groups[f"agent:{name}"] = {key: formula.replace("IsFinal", final)
+                                      for key, formula in _AGENT_COMPLETION_PROPERTIES.items()}
+    results = _check_groups(net, groups, tina_bin, timeout)
+    return {
+        "completion": results["completion"] if has_finals else None,
+        "deadlocks": results["deadlocks"],
+        "properties": results["properties"],
+        "agent_completion": {name: results.get(f"agent:{name}") for name in local_finals},
+    }
