@@ -275,7 +275,16 @@ class RealPipelineAuditTests(unittest.TestCase):
                 self.assertEqual(report["dead_transitions"], expected_dead)
                 expected_stdout = ("Dead transitions:\n" + "".join(f"  {t}\n" for t in expected_dead)
                                    if expected_dead else "No dead transitions.\n")
-                self.assertEqual(proc.stdout, expected_stdout)
+                self.assertTrue(proc.stdout.startswith(expected_stdout), proc.stdout)
+                if source.finals or source.unrestricted_finals:
+                    completion = report["completion"]
+                    self.assertEqual(set(completion), {"option_to_complete", "all_traces_complete"})
+                    self.assertTrue(all(isinstance(value, bool) for value in completion.values()))
+                    self.assertIn("Option to complete from every reachable marking:", proc.stdout)
+                    self.assertIn("All traces eventually reach a final marking:", proc.stdout)
+                else:
+                    self.assertIsNone(report["completion"])
+                    self.assertIn("Completion not checked: no final declarations.", proc.stdout)
                 original = read_export_with_ndrio(Path(f"{prefix}.net"), ndrio)
                 pruned = read_export_with_ndrio(Path(f"{prefix}-pruned.net"), ndrio)
                 self.assertEqual(original[0], set(source.places))

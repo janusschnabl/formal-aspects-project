@@ -12,6 +12,8 @@
 
     initial: home=3                          # M0, unlisted places are 0
     final: served=3                          # one marking of MF per 'final:'
+    unrestricted final: served=3             # ignore all unlisted places
+    ctl: can_finish = AG EF IsFinal          # one named formula per line
 
 Rules:
   - '#' starts a comment. A line without a keyword continues the previous section.
@@ -33,11 +35,11 @@ from .model import VAR, AgentNet, MultiAgentNet, Weight
 
 IDENT = r"[A-Za-z_][A-Za-z0-9_]*"
 NAME = rf"{IDENT}(?:\[[^\]\[]*\])*"          # p, p[i], or p[i][j]
-KEYWORDS = ("agent", "index", "places", "transitions", "labels", "arcs", "read", "initial", "final")
+KEYWORDS = ("agent", "index", "places", "transitions", "labels", "arcs", "read", "initial", "final", "unrestricted final", "ctl")
 AGENT_SECTIONS = ("places", "transitions", "labels", "arcs", "read")
 SILENT = ("eps", "epsilon", "ε", "tau")
 
-KEYWORD_RE = re.compile(rf"^({'|'.join(KEYWORDS)})\s*:(.*)$")
+KEYWORD_RE = re.compile(rf"^({'|'.join(KEYWORDS)})\s*:(.*)$".replace("unrestricted final", r"unrestricted\s+final"))
 FOR_RE = re.compile(r"\bfor\b(.*)$")
 BINDING_RE = re.compile(rf"({IDENT})\s+in\s+(\{{[^}}]*\}}|-?\d+\s*\.\.\s*-?\d+|{IDENT})")
 INDEX_DEF_RE = re.compile(rf"({IDENT})\s*=\s*(\{{[^}}]*\}}|-?\d+\s*\.\.\s*-?\d+)")
@@ -180,6 +182,8 @@ def parse(text: str) -> MultiAgentNet:
     label_lines: list[tuple[int, AgentNet, str, str | None]] = []
     initial_lines: list[tuple[int, str, int]] = []
     final_lines: list[list[tuple[int, str, int]]] = []
+    unrestricted_final_lines: list[list[tuple[int, str, int]]] = []
+    ctl_properties: dict[str, str] = {}
 
     agent: AgentNet | None = None
     section: str | None = None
@@ -190,12 +194,16 @@ def parse(text: str) -> MultiAgentNet:
             continue
         m = KEYWORD_RE.match(line)
         if m:
-            section, body = m.group(1), m.group(2).strip()
+            section, body = " ".join(m.group(1).split()), m.group(2).strip()
             if section == "final":
                 final_lines.append([])
+            elif section == "unrestricted final":
+                unrestricted_final_lines.append([])
         elif section is None:
             raise ParseError(lineno, f"expected a keyword ({', '.join(k + ':' for k in KEYWORDS)}), got {line!r}")
         else:
+            if section == "ctl":
+                raise ParseError(lineno, "each CTL property must be a single 'ctl: name = formula' line")
             body = line
 
         if section == "agent":
@@ -213,6 +221,17 @@ def parse(text: str) -> MultiAgentNet:
                 if mm.group(1) in indices:
                     raise ParseError(lineno, f"index set {mm.group(1)!r} defined twice")
                 indices[mm.group(1)] = _parse_set(mm.group(2), indices, lineno)
+            continue
+        if section == "ctl":
+            declaration = re.fullmatch(rf"({IDENT})\s*=\s*(.+)", body)
+            if declaration is None or ";" in body:
+                raise ParseError(lineno, "expected 'ctl: name = formula' without ';'")
+            name, formula = declaration.group(1), declaration.group(2).strip()
+            if not formula:
+                raise ParseError(lineno, "CTL formula cannot be empty")
+            if name in ctl_properties:
+                raise ParseError(lineno, f"CTL property {name!r} given twice")
+            ctl_properties[name] = formula
             continue
         if section in AGENT_SECTIONS and agent is None:
             raise ParseError(lineno, f"'{section}:' must come after an 'agent:' line")
@@ -244,9 +263,10 @@ def parse(text: str) -> MultiAgentNet:
             for p, t in _unique([(m.group(1), m.group(2)) for b in bodies for m in _scan(b, READ_RE, lineno, "read arc (expected (place, transition))")], len(bodies) > 1):
                 read_lines.append((lineno, agent, p, t))
 
-        elif section in ("initial", "final"):
+        elif section in ("initial", "final", "unrestricted final"):
             entries = [(lineno, m.group(1), int(m.group(2))) for b in bodies for m in _scan(b, ASSIGN_RE, lineno, "marking entry (expected place=N)")]
-            (initial_lines if section == "initial" else final_lines[-1]).extend(_unique(entries, len(bodies) > 1))
+            target = initial_lines if section == "initial" else (final_lines if section == "final" else unrestricted_final_lines)[-1]
+            target.extend(_unique(entries, len(bodies) > 1))
 
     # ---- semantic checks --------------------------------------------------
 
@@ -295,7 +315,7 @@ def parse(text: str) -> MultiAgentNet:
             raise ParseError(lineno, f"{ctx} is also an ordinary arc (read arcs and arcs must be disjoint)")
         a.read_arcs.append((p, t))
 
-    def marking(lines: list[tuple[int, str, int]], ctx: str) -> dict[str, int]:
+    def marking(lines: list[tuple[int, str, int]], ctx: str, keep_zeros: bool = False) -> dict[str, int]:
         m: dict[str, int] = {}
         seen: set[str] = set()
         for lineno, p, n in lines:
@@ -303,7 +323,7 @@ def parse(text: str) -> MultiAgentNet:
             if p in seen:
                 raise ParseError(lineno, f"{ctx}: {p!r} given twice")
             seen.add(p)
-            if n:
+            if n or keep_zeros:
                 m[p] = n
         return m
 
@@ -311,6 +331,8 @@ def parse(text: str) -> MultiAgentNet:
         agents=agents,
         initial=marking(initial_lines, "initial marking"),
         finals=[marking(f, "final marking") for f in final_lines],
+        unrestricted_finals=[marking(f, "unrestricted final marking", keep_zeros=True) for f in unrestricted_final_lines],
+        ctl_properties=ctl_properties,
     )
 
 

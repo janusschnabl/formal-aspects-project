@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 from .net import PetriNet, Transition
 
@@ -147,3 +148,92 @@ def dead_transitions(net: PetriNet, tina_bin: str | None = None, timeout: float 
             raise TinaError(f"Tina did not write a result:\n{proc.stderr or proc.stdout}")
         with report.open(encoding="utf-8") as stream:
             return _parse_result(stream, net)
+
+
+def _check_ctl(net: PetriNet, expressions: list[str], tina_bin: str | None, timeout: float | None) -> list[bool]:
+    """Evaluate CTL expressions at the initial state of Tina's full graph."""
+    clauses = [{p: marking[p] for p in net.places} for marking in net.final_markings]
+    clauses.extend(net.unrestricted_final_markings)
+    terms = []
+    for clause in clauses:
+        constraints = []
+        for p, count in sorted(clause.items()):
+            # Tina canonicalizes simple names without braces in .ktz files.
+            name = p.name if re.fullmatch(r"[A-Za-z0-9_']+", p.name) else _identifier(p.name)
+            constraints.append(f"(S.{name} = {count})")
+        terms.append("(" + " /\\ ".join(constraints) + ")" if constraints else "T:S")
+    final = " \\/ ".join(sorted(terms)) or "F:S"
+
+    executable = resolve_executable(tina_bin)
+    binary = Path(shutil.which(executable) or executable).resolve()
+    muse = binary.with_name("muse.exe" if binary.suffix.lower() == ".exe" else "muse")
+    if (sys.platform == "linux" and muse.parent == (_BUNDLED_ROOT / "linux-amd64" / "bin").resolve()
+            and muse.is_file() and not os.access(muse, os.X_OK)):
+        try:
+            muse.chmod(muse.stat().st_mode | 0o100)
+        except OSError as e:
+            raise TinaError(f"cannot make bundled Muse executable: {e}") from None
+    deadline = None if timeout is None else time.monotonic() + timeout
+
+    def run(cmd):
+        remaining = None if deadline is None else max(0, deadline - time.monotonic())
+        if remaining == 0:
+            raise TinaError("Tina/Muse completion check timed out")
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=remaining)
+        except FileNotFoundError:
+            raise TinaError(f"Completion-check executable {cmd[0]!r} not found") from None
+        except subprocess.TimeoutExpired:
+            raise TinaError("Tina/Muse completion check timed out") from None
+        if proc.returncode != 0:
+            raise TinaError(f"Completion check failed: {proc.stderr or proc.stdout}")
+        return proc.stdout
+
+    with tempfile.TemporaryDirectory() as tmp:
+        source, graph, formulas = (Path(tmp) / name for name in ("net.net", "net.ktz", "completion.mmc"))
+        source.write_text(to_tina(net), encoding="utf-8")
+        digest = run([str(binary), "-NET", "-R", "-ktz", str(source), str(graph)])
+        if not re.search(r"^#\s+bounded(?:,|\s)", digest, re.MULTILINE) or not graph.is_file():
+            raise TinaError("Tina did not complete a bounded reachability analysis for completion checking")
+        # AF/EG include terminal executions. EX/AX treat a deadlock as an
+        # implicit self-loop, as in a total Kripke structure (no net arcs added).
+        formulas.write_text(
+            "prefix EF g = min x | g \\/ <T>x;\n"
+            "prefix AG g = max x | g /\\ [T]x;\n"
+            "prefix AF g = min x | g \\/ (<T>T /\\ [T]x);\n"
+            "prefix EG g = max x | g /\\ ([T]F \\/ <T>x);\n"
+            "prefix EX g = <T>g \\/ ([T]F /\\ g);\n"
+            "prefix AX g = [T]g /\\ (<T>T \\/ g);\n"
+            "op EU f g = min x | g \\/ (f /\\ <T>x);\n"
+            "op AU f g = min x | g \\/ (f /\\ <T>T /\\ [T]x);\n"
+            f"op IsFinal = {final};\n" + ";\n".join(expressions) + ";\n",
+            encoding="utf-8",
+        )
+        answers = run([str(muse), "-q", "-b", str(graph), str(formulas)]).splitlines()
+        if len(answers) != len(expressions) or any(answer not in {"TRUE", "FALSE"} for answer in answers):
+            raise TinaError("could not read Muse CTL results: " + "\n".join(answers))
+        return [answer == "TRUE" for answer in answers]
+
+
+def check_completion(net: PetriNet, tina_bin: str | None = None, timeout: float | None = None) -> dict[str, bool] | None:
+    """Check AG EF IsFinal and AF IsFinal; None means no final declarations."""
+    if not net.final_markings and not net.unrestricted_final_markings:
+        return None
+    option, inevitable = _check_ctl(net, ["AG (EF IsFinal)", "AF IsFinal"], tina_bin, timeout)
+    return {"option_to_complete": option, "all_traces_complete": inevitable}
+
+
+def verify_properties(net: PetriNet, tina_bin: str | None = None, timeout: float | None = None):
+    """Check default completion and named CTL properties in one Muse session."""
+    has_finals = bool(net.final_markings or net.unrestricted_final_markings)
+    expressions = ["AG (EF IsFinal)", "AF IsFinal"] if has_finals else []
+    properties = net.ctl_properties
+    expressions.extend(properties.values())
+    if not expressions:
+        return None, {}
+    answers = _check_ctl(net, expressions, tina_bin, timeout)
+    completion = None
+    if has_finals:
+        completion = {"option_to_complete": answers[0], "all_traces_complete": answers[1]}
+        answers = answers[2:]
+    return completion, dict(zip(properties, answers))

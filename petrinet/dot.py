@@ -56,14 +56,23 @@ class _DotWriter:
         return "\n".join([*self.lines, "}", ""])
 
 
-def _finals_legend(finals: Iterable[Mapping[str, int]]) -> str:
+def _finals_legend(finals: Iterable[Mapping[str, int]], unrestricted: Iterable[Mapping[str, int]] = ()) -> str:
     entries = sorted({
         "{" + ", ".join(f"{p}={n}" for p, n in sorted(m.items()) if n) + "}"
         for m in finals
     })
-    if not entries:
+    unrestricted_entries = sorted({
+        "{" + ", ".join(f"{p}={n}" for p, n in sorted(m.items())) + "}"
+        for m in unrestricted
+    })
+    if not entries and not unrestricted_entries:
         return "Final markings: none specified"
-    return "Final markings (unlisted places = 0):\n" + "\n".join(entries)
+    sections = []
+    if entries:
+        sections.append("Final markings (unlisted places = 0):\n" + "\n".join(entries))
+    if unrestricted_entries:
+        sections.append("Unrestricted final markings (unlisted places = any):\n" + "\n".join(unrestricted_entries))
+    return "\n".join(sections)
 
 
 def to_dot(
@@ -98,7 +107,8 @@ def to_dot(
     for arc in sorted(net.arcs, key=lambda a: (a.source.name, a.target.name)):
         writer.edge(ids[arc.source], ids[arc.target], label=str(arc.weight) if arc.weight > 1 else "")
     finals = ({p.name: m[p] for p in net.places if m[p]} for m in net.final_markings)
-    return writer.finish(_finals_legend(finals))
+    unrestricted = ({p.name: n for p, n in clause.items()} for clause in net.unrestricted_final_markings)
+    return writer.finish(_finals_legend(finals, unrestricted))
 
 
 def to_agent_dot(net: MultiAgentNet) -> str:
@@ -127,4 +137,4 @@ def to_agent_dot(net: MultiAgentNet) -> str:
             writer.edge(ids[p], ids[t], style="dashed", label="read")
         writer.lines.append("  }")
     legend = "Same non-silent label = synchronized firing across agents.\nDashed read arc: requires a token without consuming it."
-    return writer.finish(legend + "\n" + _finals_legend(net.finals))
+    return writer.finish(legend + "\n" + _finals_legend(net.finals, net.unrestricted_finals))

@@ -5,6 +5,9 @@ The format mirrors N = ((P, T, F), m_0):
     places: p1 p2 p3                  # P
     transitions: t1 t2                # T
     initial: p1=1 p3=2                # m_0 (places not listed get 0)
+    final: p2=3                      # exact final; unlisted places get 0
+    unrestricted final: p2=3         # final clause; unlisted places may vary
+    ctl: can_finish = AG EF IsFinal  # one named formula per line
     arcs: (p1, t1) (t1, p2)           # F, each arc is (place, transition)
           (p2, t2, 2) (t2, p3)        #    or (transition, place); the optional
                                       #    3rd element is the weight (default 1)
@@ -31,7 +34,7 @@ from .net import Arc, InputArc, Marking, OutputArc, PetriNet, PetriNetError, Pla
 
 NAME = r"[A-Za-z_][A-Za-z0-9_]*"
 NAME_RE = re.compile(NAME)
-KEYWORD_RE = re.compile(r"^(places|transitions|initial|arcs)\s*:(.*)$")
+KEYWORD_RE = re.compile(r"^(places|transitions|initial|arcs|final|unrestricted\s+final|ctl)\s*:(.*)$")
 ARC_RE = re.compile(rf"\(\s*({NAME})\s*,\s*({NAME})\s*(?:,\s*(\d+)\s*)?\)")
 MARKING_RE = re.compile(rf"({NAME})\s*=\s*(\d+)")
 
@@ -50,6 +53,9 @@ class Declarations:
     transitions: list[tuple[int, str]] = field(default_factory=list)          # (line, name)
     tokens: list[tuple[int, str, int]] = field(default_factory=list)          # (line, place, tokens)
     arcs: list[tuple[int, str, str, int]] = field(default_factory=list)       # (line, source, target, weight)
+    finals: list[list[tuple[int, str, int]]] = field(default_factory=list)
+    unrestricted_finals: list[list[tuple[int, str, int]]] = field(default_factory=list)
+    ctl_properties: dict[str, str] = field(default_factory=dict)
 
 
 def load(path: str) -> PetriNet:
@@ -103,7 +109,23 @@ def build_net(decl: Declarations) -> PetriNet:
         with _errors_at_line(lineno):
             arcs.add(_make_arc(nodes[source], nodes[target], weight, lineno))
 
-    return PetriNet(places, transitions, arcs, Marking(tokens))
+    def final_clause(entries, description):
+        clause = {}
+        for lineno, name, count in entries:
+            place = nodes.get(name)
+            if not isinstance(place, Place):
+                raise ParseError(lineno, f"{description}: {name!r} is not a declared place")
+            if place in clause:
+                raise ParseError(lineno, f"{description}: {name!r} given twice")
+            clause[place] = count
+        return clause
+
+    return PetriNet(
+        places, transitions, arcs, Marking(tokens),
+        final_markings=[Marking(final_clause(m, "final marking")) for m in decl.finals],
+        unrestricted_final_markings=[final_clause(m, "unrestricted final marking") for m in decl.unrestricted_finals],
+        ctl_properties=decl.ctl_properties,
+    )
 
 
 def _make_arc(source: Place | Transition, target: Place | Transition, weight: int, lineno: int) -> Arc:
@@ -148,14 +170,30 @@ def read_declarations(text: str) -> Declarations:
 
         m = KEYWORD_RE.match(line)
         if m:
-            section = m.group(1)
+            section = " ".join(m.group(1).split())
             body = m.group(2)
+            if section == "final":
+                decl.finals.append([])
+            elif section == "unrestricted final":
+                decl.unrestricted_finals.append([])
         elif section is None:
-            raise ParseError(lineno, f"expected 'places:', 'transitions:', 'initial:' or 'arcs:', got {line!r}")
+            raise ParseError(lineno, f"expected 'places:', 'transitions:', 'initial:', 'arcs:', 'final:', 'unrestricted final:' or 'ctl:', got {line!r}")
         else:
+            if section == "ctl":
+                raise ParseError(lineno, "each CTL property must be a single 'ctl: name = formula' line")
             body = line  # continuation of the previous section
 
-        if section == "places":
+        if section == "ctl":
+            declaration = re.fullmatch(rf"({NAME})\s*=\s*(.+)", body.strip())
+            if declaration is None or ";" in body:
+                raise ParseError(lineno, "expected 'ctl: name = formula' without ';'")
+            name, formula = declaration.group(1), declaration.group(2).strip()
+            if not formula:
+                raise ParseError(lineno, "CTL formula cannot be empty")
+            if name in decl.ctl_properties:
+                raise ParseError(lineno, f"CTL property {name!r} given twice")
+            decl.ctl_properties[name] = formula
+        elif section == "places":
             for name in _names(body, lineno):
                 decl.places.append((lineno, name))
         elif section == "transitions":
@@ -164,6 +202,10 @@ def read_declarations(text: str) -> Declarations:
         elif section == "initial":
             for mm in _scan(body, MARKING_RE, lineno, "marking (expected place=N)"):
                 decl.tokens.append((lineno, mm.group(1), int(mm.group(2))))
+        elif section in ("final", "unrestricted final"):
+            target = (decl.finals if section == "final" else decl.unrestricted_finals)[-1]
+            for mm in _scan(body, MARKING_RE, lineno, "final marking (expected place=N)"):
+                target.append((lineno, mm.group(1), int(mm.group(2))))
         else:  # arcs
             for mm in _scan(body, ARC_RE, lineno, "arc (expected (x, y) or (x, y, weight))"):
                 weight = int(mm.group(3)) if mm.group(3) else 1

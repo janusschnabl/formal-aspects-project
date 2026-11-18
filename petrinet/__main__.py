@@ -21,6 +21,8 @@ def _prune_pipeline(net: PetriNet, args, labels):
         "status": "checking", "input": args.net,
         "before": {"places": len(net.places), "transitions": len(net.transitions), "arcs": len(net.arcs)},
         "dead_transitions": None, "removed_transitions": None,
+        "completion": None,
+        "properties": {},
     }
 
     def write_report():
@@ -29,6 +31,9 @@ def _prune_pipeline(net: PetriNet, args, labels):
     write_report()
     try:
         dead = tina.dead_transitions(net, args.tina, args.timeout)
+        completion, properties = tina.verify_properties(net, args.tina, args.timeout)
+        report["completion"] = completion
+        report["properties"] = properties
         pruned = net.without_transitions(dead)
         report["dead_transitions"] = [t.name for t in sorted(dead)]
         report["after"] = {"places": len(pruned.places), "transitions": len(pruned.transitions), "arcs": len(pruned.arcs)}
@@ -46,7 +51,7 @@ def _prune_pipeline(net: PetriNet, args, labels):
         report["removed_transitions"] = report["dead_transitions"]
         report["pruned_files"] = list(files)
         write_report()
-        return dead
+        return dead, completion, properties
     except (OSError, PetriNetError, tina.TinaError, GraphvizError) as e:
         report["status"] = "failed"
         report["error"] = str(e)
@@ -61,12 +66,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--emit", "--emit-tina", dest="emit", metavar="FILE", help="write the Tina .net translation to FILE ('-' for stdout) and exit")
     ap.add_argument("--dot", metavar="FILE", help="write the standard net as Graphviz DOT and exit ('-' for stdout)")
     ap.add_argument("--raw-dot", metavar="FILE", help="write raw agent nets as DOT; requires --agentnet")
-    ap.add_argument("--pipeline", metavar="PREFIX", help="draw original nets, check with Tina, report removed dead transitions, then export and draw the pruned net")
+    ap.add_argument("--pipeline", metavar="PREFIX", help="draw original nets, check dead transitions and completion, then report removals and draw the pruned net")
     ap.add_argument("--raw-render", metavar="PREFIX", help="parse and draw only the agent model as DOT and SVG; requires --agentnet")
     ap.add_argument("--render", metavar="PREFIX", help="export Tina .net, DOT, and SVG files using PREFIX; also raw-agent diagrams with --agentnet")
     ap.add_argument("--graphviz", default="dot", metavar="PATH", help="Graphviz dot executable for --render (default: dot)")
     ap.add_argument("--tina", metavar="PATH", help="override the automatically selected Tina executable")
-    ap.add_argument("--timeout", type=float, default=None, help="maximum seconds for the Tina analysis")
+    ap.add_argument("--timeout", type=float, default=None, help="maximum seconds for each dead-transition or completion check")
     args = ap.parse_args(argv)
 
     if args.pipeline is not None:
@@ -138,8 +143,11 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         pipeline_check_started = args.pipeline is not None
-        dead = (_prune_pipeline(net, args, labels) if args.pipeline is not None
-                else tina.dead_transitions(net, args.tina, args.timeout))
+        completion = None
+        if args.pipeline is not None:
+            dead, completion, properties = _prune_pipeline(net, args, labels)
+        else:
+            dead = tina.dead_transitions(net, args.tina, args.timeout)
     except (OSError, ParseError, agentnet.ParseError, agentnet.ConversionError, PetriNetError,
             tina.TinaError, GraphvizError) as e:
         if args.pipeline is not None and not pipeline_check_started:
@@ -163,6 +171,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {t.name}")
     else:
         print("No dead transitions.")
+    if args.pipeline is not None:
+        if completion is None:
+            print("Completion not checked: no final declarations.")
+        else:
+            print("Option to complete from every reachable marking: " + ("yes" if completion["option_to_complete"] else "no"))
+            print("All traces eventually reach a final marking: " + ("yes" if completion["all_traces_complete"] else "no"))
+        for name, holds in properties.items():
+            print(f"CTL {name}: " + ("yes" if holds else "no"))
     return 0
 
 

@@ -95,7 +95,8 @@ def _validate(source: MultiAgentNet) -> None:
             if ends in agent.arcs or ends in reads:
                 raise ConversionError(f"{agent.name}: overlapping or duplicate read arc {ends!r}")
             reads.add(ends)
-    for description, marking in [("initial", source.initial), *[("final", m) for m in source.finals]]:
+    for description, marking in [("initial", source.initial), *[("final", m) for m in source.finals],
+                                 *[("unrestricted final", m) for m in source.unrestricted_finals]]:
         if not isinstance(marking, dict):
             raise ConversionError(f"{description} marking must map place names to token counts")
         for p, count in marking.items():
@@ -158,5 +159,7 @@ def convert(source: MultiAgentNet) -> ConversionResult:
     net = PetriNet(
         set(place_map.values()), transitions, arcs, marking(source.initial),
         final_markings=[marking(m) for m in source.finals],
+        unrestricted_final_markings=[{place_map[p]: n for p, n in m.items()} for m in source.unrestricted_finals],
+        ctl_properties=source.ctl_properties,
     )
     return ConversionResult(net, place_map, origins)

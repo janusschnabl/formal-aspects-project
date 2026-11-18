@@ -43,8 +43,9 @@ Example:
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+import re
 
 
 class PetriNetError(ValueError):
@@ -216,6 +217,8 @@ class PetriNet:
         initial_marking: Marking | None = None,
         *,
         final_markings: Iterable[Marking] | None = None,
+        unrestricted_final_markings: Iterable[Mapping[Place, int]] | None = None,
+        ctl_properties: Mapping[str, str] | None = None,
     ) -> None:
         self._places = frozenset(places)
         self._transitions = frozenset(transitions)
@@ -232,6 +235,25 @@ class PetriNet:
             self._check_marking(marking, "final marking")
             finals.append(marking)
         self._final_markings = frozenset(finals)
+        unrestricted = []
+        for clause in (() if unrestricted_final_markings is None else unrestricted_final_markings):
+            if not isinstance(clause, Mapping):
+                raise PetriNetError("unrestricted final marking must map places to token counts")
+            for place, count in clause.items():
+                if not isinstance(place, Place) or place not in self._places:
+                    raise PetriNetError(f"unrestricted final marking references unknown place {place!r}")
+                if not _is_natural_number(count):
+                    raise PetriNetError(f"unrestricted final marking: tokens at {place} must be a natural number")
+            unrestricted.append(dict(clause))
+        self._unrestricted_final_markings = tuple(unrestricted)
+        if ctl_properties is not None and not isinstance(ctl_properties, Mapping):
+            raise PetriNetError("CTL properties must map names to formulas")
+        self._ctl_properties = dict(ctl_properties or {})
+        for name, formula in self._ctl_properties.items():
+            if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+                raise PetriNetError(f"invalid CTL property name {name!r}")
+            if not isinstance(formula, str) or not formula.strip() or ";" in formula:
+                raise PetriNetError(f"CTL property {name!r} needs one nonempty formula without ';'")
 
         # W, so that weight(x, y) does not have to search F every time.
         self._weights: dict[tuple[Place | Transition, Place | Transition], int] = {}
@@ -258,9 +280,21 @@ class PetriNet:
     def final_markings(self) -> frozenset[Marking]:
         return self._final_markings
 
+    @property
+    def unrestricted_final_markings(self) -> tuple[dict[Place, int], ...]:
+        """Final clauses whose unlisted places may have any token count."""
+        return tuple(dict(clause) for clause in self._unrestricted_final_markings)
+
+    @property
+    def ctl_properties(self) -> dict[str, str]:
+        return dict(self._ctl_properties)
+
     def is_final(self, marking: Marking) -> bool:
-        """Whether marking is exactly one of M_F (unlisted places have zero)."""
-        return marking in self._final_markings
+        """Whether any exact or unrestricted final declaration matches."""
+        return marking in self._final_markings or any(
+            all(marking[p] == n for p, n in clause.items())
+            for clause in self._unrestricted_final_markings
+        )
 
     def without_transitions(self, transitions: Iterable[Transition]) -> PetriNet:
         """Return a new net without these transitions and their incident arcs.
@@ -275,6 +309,8 @@ class PetriNet:
             set(self.places), set(self.transitions - removed),
             {arc for arc in self.arcs if arc.transition not in removed},
             self.initial_marking, final_markings=self.final_markings,
+            unrestricted_final_markings=self.unrestricted_final_markings,
+            ctl_properties=self.ctl_properties,
         )
 
     def _check_places_and_transitions(self) -> None:

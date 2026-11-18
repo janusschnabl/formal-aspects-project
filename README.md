@@ -16,7 +16,7 @@ python -m petrinet examples/agents/example.txt --agentnet --pipeline out/example
 
 This single command parses the agent model, creates its diagram, converts it
 once to a standard Petri net, creates the standard-net diagram, and checks
-that same converted net for dead transitions. It records and removes all dead
+that same converted net for dead transitions and completion. It records and removes all dead
 transitions, then saves and draws the resulting net. The original standard-net
 files are written before Tina runs and preserved for comparison. It creates
 `out/` as needed.
@@ -27,14 +27,15 @@ files are written before Tina runs and preserved for comparison. It creates
 | `out/example.svg` | Converted standard weighted Petri net |
 | `out/example.net` | Converted net in Tina format |
 | `out/example-agent.dot`, `out/example.dot` | Graphviz sources for the diagrams |
-| `out/example-results.json` | Analysis status, dead and removed transition names, and before/after counts |
+| `out/example-results.json` | Analysis status, completion verdicts, dead/removed transitions, and before/after counts |
 | `out/example-pruned.net` | Standard net with all dead transitions and their incident arcs removed |
 | `out/example-pruned.svg`, `out/example-pruned.dot` | Diagram and Graphviz source for the resulting net |
-| Terminal | Dead-transition result; this example prints `No dead transitions.` |
+| Terminal | Dead transitions, option to complete from every reachable marking, and whether all traces reach a final |
 
 Open the SVG files in a browser to view and zoom. Replace the input filename
 and output prefix with your own, for example `--pipeline out/shop`.
-The `--timeout 60` option limits the Tina analysis to 60 seconds.
+The `--timeout 60` option limits each dead-transition or completion check to
+60 seconds. Completion checking uses the Muse executable supplied beside Tina.
 
 Pruning preserves every place, initial marking, final marking, and surviving
 transition's name and arc weights. Places that become isolated remain visible.
@@ -50,6 +51,74 @@ python -m petrinet examples/two_dead.txt --pipeline out/two_dead
 
 The report lists `t3` and `t4` as removed; `out/two_dead-pruned.svg` shows the
 remaining transitions `t1` and `t2`.
+
+## Final markings and completion
+
+Both input formats allow a union of final declarations:
+
+```text
+final: boarded=3 boarding_closed=2 crew_idle=2
+unrestricted final: boarded=3 boarding_closed=2
+unrestricted final: cancelled=3 flights_cancelled=2
+```
+
+An ordinary `final:` is an exact marking: every unlisted place must have zero
+tokens. In `unrestricted final:`, only the listed places are constrained;
+all other places, such as crew places, may have any token count. A marking is
+final if **any** declaration matches. An explicit `place=0` still constrains
+that place. Empty `final:` means the all-zero marking; empty
+`unrestricted final:` accepts every marking. Agent index expansion and
+continuation lines work in both kinds of final declaration.
+
+The existing `--pipeline` command automatically prints and records:
+
+- **Option to complete from every reachable marking** (`AG EF final`):
+  every reachable marking has some finite firing sequence to a final marking.
+- **All traces eventually reach a final marking** (`AF final`): every maximal
+  execution reaches a final marking. No fairness is assumed, so a loop that
+  can avoid completion makes this false even if an exit to a final exists.
+
+A non-final deadlock fails both checks. A final marking counts as already
+completed; finals do not stop subsequent firing. In particular, `AF final`
+does not require executions to terminate or stay final afterward.
+
+These verdicts appear as booleans `completion.option_to_complete` and
+`completion.all_traces_complete` in the result JSON. With no final declarations,
+the pipeline prints that completion was not checked and records `completion: null`.
+A false property is a completed verification result (exit code 0), not a tool
+error. Incomplete analysis or checker errors still produce a failed report
+and exit code 2.
+
+### Write your own CTL properties
+
+Add named, single-line CTL declarations to either input format:
+
+```text
+ctl: can_always_complete = AG EF IsFinal
+ctl: completion_is_inevitable = AF IsFinal
+ctl: can_avoid_completion = EG (- IsFinal)
+```
+
+`IsFinal` means membership in the union of all exact and unrestricted final
+declarations. The pipeline evaluates each property at the initial marking,
+prints `CTL name: yes/no`, and records its boolean in `properties.name` in the
+JSON report. The default completion checks and named properties share one
+Tina reachability graph and Muse session. False properties do not remove any
+extra transitions or alter the final set.
+
+Supported temporal operators are `AG`, `AF`, `EG`, `EF`, `AX`, `EX`, and until
+expressions `EU condition target` / `AU condition target`. Boolean notation is
+`-` (not), `/\` (and), `\/` (or), and `=>` (implies), with parentheses for
+grouping. A place count can be referenced as `S.waiting`; indexed names use
+braces, for example `AG (S.{boarded[1]} <= 3)`. These expressions are translated
+to Muse's fixed-point definitions internally; no mu-calculus is needed in the
+input file. LTL declarations are not currently supported.
+
+Each `ctl:` needs a unique name and a nonempty expression; omit trailing
+semicolons. No final declarations means `IsFinal` is false everywhere, while
+the automatic completion checks remain marked as not specified. Terminal
+states are treated as having an implicit temporal self-loop for `AX`/`EX`;
+this does not add transitions to the Petri net. CTL properties assume no fairness.
 
 ## Run each step individually
 
@@ -174,8 +243,10 @@ Conversion checks well-formedness and token conservation, merges synchronized
 transitions, expands variable weights using each agent type's initial
 population, and replaces read arcs with matching input/output arcs. It keeps
 all generated transitions, including unreachable ones. Final markings are
-preserved as Python metadata and shown in diagrams; they do not stop firing
-or change dead-transition analysis.
+preserved through conversion and pruning and shown in diagrams. The pipeline
+checks completion against their union on the original reachable graph; they
+do not stop firing or change dead-transition analysis. The `.net` export
+contains the net structure, not the final or CTL declarations.
 
 ## Tools and limits
 

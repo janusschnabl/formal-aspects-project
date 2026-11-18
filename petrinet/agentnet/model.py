@@ -83,6 +83,8 @@ class MultiAgentNet:
     agents: dict[str, AgentNet] = field(default_factory=dict)   # A and the N_a
     initial: dict[str, int] = field(default_factory=dict)       # M0
     finals: list[dict[str, int]] = field(default_factory=list)  # MF
+    unrestricted_finals: list[dict[str, int]] = field(default_factory=list)  # unlisted places unrestricted
+    ctl_properties: dict[str, str] = field(default_factory=dict)
 
     # ---- structure -------------------------------------------------------
 

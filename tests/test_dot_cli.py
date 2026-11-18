@@ -93,7 +93,10 @@ class CliTests(unittest.TestCase):
                 mock.patch("petrinet.__main__.render_svg", return_value="<svg/>"), \
                 mock.patch("petrinet.__main__.agentnet.load", wraps=agentnet.load) as load, \
                 mock.patch("petrinet.__main__.agentnet.convert", wraps=agentnet.convert) as convert, \
-                mock.patch("petrinet.__main__.tina.dead_transitions", return_value=[]) as check:
+                mock.patch("petrinet.__main__.tina.dead_transitions", return_value=[]) as check, \
+                mock.patch("petrinet.__main__.tina.verify_properties", return_value=({
+                    "option_to_complete": True, "all_traces_complete": True,
+                }, {})) as completion:
             prefix = Path(tmp) / "new folder" / "example"
             def verify_original_before_check(net, *args):
                 self.assertTrue(Path(f"{prefix}.net").exists())
@@ -103,10 +106,13 @@ class CliTests(unittest.TestCase):
             check.side_effect = verify_original_before_check
             self.assertEqual(run_cli([os.path.join(EXAMPLES, "example.txt"), "--agentnet",
                                       "--pipeline", str(prefix), "--timeout", "10"]),
-                             (0, "No dead transitions.\n", ""))
+                             (0, "No dead transitions.\n"
+                              "Option to complete from every reachable marking: yes\n"
+                              "All traces eventually reach a final marking: yes\n", ""))
             load.assert_called_once()
             convert.assert_called_once()
             check.assert_called_once()
+            completion.assert_called_once_with(check.call_args.args[0], None, 10)
             from petrinet.tina import to_tina
             self.assertEqual(Path(f"{prefix}.net").read_text(encoding="utf-8"), to_tina(check.call_args.args[0]))
             self.assertEqual(check.call_args.args[1:], (None, 10))
@@ -115,12 +121,17 @@ class CliTests(unittest.TestCase):
             self.assertEqual(report["status"], "complete")
             self.assertEqual(report["removed_transitions"], [])
             self.assertEqual(report["before"], report["after"])
+            self.assertEqual(report["completion"], completion.return_value[0])
+            self.assertEqual(report["properties"], {})
 
     def test_failed_check_overwrites_previous_success_report(self):
         from petrinet.tina import TinaError
         with tempfile.TemporaryDirectory() as tmp, \
                 mock.patch("petrinet.__main__.render_svg", return_value="<svg/>"), \
-                mock.patch("petrinet.__main__.tina.dead_transitions", side_effect=[[], TinaError("timed out")]):
+                mock.patch("petrinet.__main__.tina.dead_transitions", side_effect=[[], TinaError("timed out")]), \
+                mock.patch("petrinet.__main__.tina.verify_properties", return_value=({
+                    "option_to_complete": True, "all_traces_complete": True,
+                }, {})):
             prefix = Path(tmp) / "example"
             args = [os.path.join(EXAMPLES, "example.txt"), "--agentnet", "--pipeline", str(prefix)]
             self.assertEqual(run_cli(args)[0], 0)
@@ -335,17 +346,21 @@ class RealGraphvizTests(unittest.TestCase):
             prefix = Path(tmp) / "output folder" / "example"
             self.assertEqual(run_cli([os.path.join(EXAMPLES, "example.txt"), "--agentnet",
                                       "--pipeline", str(prefix), "--timeout", "15"]),
-                             (0, "No dead transitions.\n", ""))
+                             (0, "No dead transitions.\n"
+                              "Option to complete from every reachable marking: yes\n"
+                              "All traces eventually reach a final marking: yes\n", ""))
             for suffix in [".svg", "-agent.svg"]:
                 self.assertEqual(ElementTree.parse(f"{prefix}{suffix}").getroot().tag,
                                  "{http://www.w3.org/2000/svg}svg")
             standard = os.path.join(os.path.dirname(__file__), "nets", "two_dead.txt")
             self.assertEqual(run_cli([standard, "--pipeline", str(Path(tmp) / "two_dead")]),
-                             (0, "Dead transitions:\n  t3\n  t4\n", ""))
+                             (0, "Dead transitions:\n  t3\n  t4\n"
+                              "Completion not checked: no final declarations.\n", ""))
             report = json.loads((Path(tmp) / "two_dead-results.json").read_text())
             self.assertEqual(report["removed_transitions"], ["t3", "t4"])
             self.assertEqual(report["before"]["transitions"], 4)
             self.assertEqual(report["after"]["transitions"], 2)
+            self.assertIsNone(report["completion"])
             pruned_text = (Path(tmp) / "two_dead-pruned.net").read_text()
             self.assertIn("tr {t1}", pruned_text)
             self.assertNotIn("tr {t3}", pruned_text)
