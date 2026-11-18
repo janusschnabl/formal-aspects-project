@@ -18,6 +18,7 @@ from xml.etree import ElementTree as ET
 
 from petrinet import Marking, Place
 from petrinet import agentnet, tina
+from tests.ctl_reference import expected_verification
 from tests.test_conversion import INDEXED, PAIRS
 
 
@@ -128,6 +129,12 @@ def reference_graph(source):
     return seen, edges, fired
 
 
+def reference_is_final(source, tokens):
+    return (any(all(tokens[p] == final.get(p, 0) for p in tokens) for final in source.finals)
+            or any(all(tokens[p] == count for p, count in clause.items())
+                   for clause in source.unrestricted_finals))
+
+
 class ExhaustiveConstructionTests(unittest.TestCase):
     def test_every_conserved_marking_matches_independent_source_rule(self):
         cases = [("pairs", PAIRS), ("indices", INDEXED), ("read-output", READ_OUTPUT),
@@ -152,8 +159,7 @@ class ExhaustiveConstructionTests(unittest.TestCase):
                         actual.add((tuple(sorted(origin.global_transition.members)), origin.multiplicities,
                                     tuple(after[Place(p)] for p in names)))
                     self.assertEqual(actual, expected)
-                    self.assertEqual(result.net.is_final(marking),
-                                     any(all(tokens[p] == final.get(p, 0) for p in names) for final in source.finals))
+                    self.assertEqual(result.net.is_final(marking), reference_is_final(source, tokens))
 
 
 def tool_paths():
@@ -251,6 +257,7 @@ class RealPipelineAuditTests(unittest.TestCase):
                  ("weighted", WEIGHTED), ("three-way", THREE_WAY), ("empty", ""),
                  ("zero-population", PAIRS.replace("p=3 r=2", "p=0 r=0")),
                  ("blocked", MIXED.replace("open=1", "open=0")),
+                 ("unrestricted-finals", MIXED.replace("final: p=2 q=1 open=1", "unrestricted final: p=0\nfinal: s=2 r=1 away=1")),
                  ("shop", (ROOT / "examples/agents/shop.txt").read_text())]
         for name, text in cases:
             with self.subTest(case=name), tempfile.TemporaryDirectory(prefix="pipeline audit ") as tmp:
@@ -260,6 +267,13 @@ class RealPipelineAuditTests(unittest.TestCase):
                 source = agentnet.parse(text)
                 construction = agentnet.convert(source)
                 states, source_edges, fired = reference_graph(source)
+                names = sorted(source.places)
+                finals = {state for state in states if reference_is_final(source, dict(zip(names, state)))}
+                expected = expected_verification(
+                    states, {(before, after) for before, _, _, after in source_edges},
+                    tuple(source.initial.get(p, 0) for p in names), finals,
+                    bool(source.finals or source.unrestricted_finals),
+                )
                 expected_dead = sorted(t.name for t, o in construction.transition_origins.items()
                                        if (tuple(sorted(o.global_transition.members)), o.multiplicities) not in fired)
                 if name == "mixed":
@@ -276,10 +290,12 @@ class RealPipelineAuditTests(unittest.TestCase):
                 expected_stdout = ("Dead transitions:\n" + "".join(f"  {t}\n" for t in expected_dead)
                                    if expected_dead else "No dead transitions.\n")
                 self.assertTrue(proc.stdout.startswith(expected_stdout), proc.stdout)
+                for section, verdicts in expected.items():
+                    self.assertEqual(report[section], verdicts, (name, section))
+                for key, label in [("reachable", "Reachable deadlock"),
+                                   ("non_final_reachable", "Reachable non-final deadlock")]:
+                    self.assertIn(f"{label}: " + ("yes" if expected["deadlocks"][key] else "no"), proc.stdout)
                 if source.finals or source.unrestricted_finals:
-                    completion = report["completion"]
-                    self.assertEqual(set(completion), {"option_to_complete", "all_traces_complete"})
-                    self.assertTrue(all(isinstance(value, bool) for value in completion.values()))
                     self.assertIn("Option to complete from every reachable marking:", proc.stdout)
                     self.assertIn("All traces eventually reach a final marking:", proc.stdout)
                 else:

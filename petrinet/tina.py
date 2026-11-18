@@ -1,4 +1,4 @@
-"""Export ordinary weighted nets to Tina and check dead transitions.
+"""Export weighted nets to Tina and verify reachability properties.
 
 Tina's full marking reachability graph (-R) has exactly the firing semantics
 of PetriNet. Its liveness report lists transitions that never fire. A partial
@@ -7,7 +7,7 @@ enumeration, including one stopped by unboundedness, is never a verdict.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 import os
 from pathlib import Path
 import platform
@@ -26,6 +26,25 @@ class TinaError(RuntimeError):
 
 
 _BUNDLED_ROOT = Path(__file__).resolve().parent.parent / "tools" / "tina" / "4.0.0"
+
+_COMPLETION_PROPERTIES = {
+    "option_to_complete": "AG (EF IsFinal)",
+    "all_traces_complete": "AF IsFinal",
+}
+_DEADLOCK_PROPERTIES = {
+    "reachable": "EF IsDeadlock",
+    "non_final_reachable": "EF (IsDeadlock /\\ (- IsFinal))",
+}
+_CTL_PRELUDE = r"""prefix EF g = min x | g \/ <T>x;
+prefix AG g = max x | g /\ [T]x;
+prefix AF g = min x | g \/ (<T>T /\ [T]x);
+prefix EG g = max x | g /\ ([T]F \/ <T>x);
+prefix EX g = <T>g \/ ([T]F /\ g);
+prefix AX g = [T]g /\ (<T>T \/ g);
+op EU f g = min x | g \/ (f /\ <T>x);
+op AU f g = min x | g \/ (f /\ <T>T /\ [T]x);
+op IsDeadlock = [T]F;
+"""
 
 
 def resolve_executable(tina_bin: str | None = None) -> str:
@@ -178,35 +197,27 @@ def _check_ctl(net: PetriNet, expressions: list[str], tina_bin: str | None, time
     def run(cmd):
         remaining = None if deadline is None else max(0, deadline - time.monotonic())
         if remaining == 0:
-            raise TinaError("Tina/Muse completion check timed out")
+            raise TinaError("Tina/Muse property check timed out")
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=remaining)
         except FileNotFoundError:
-            raise TinaError(f"Completion-check executable {cmd[0]!r} not found") from None
+            raise TinaError(f"Property-check executable {cmd[0]!r} not found") from None
         except subprocess.TimeoutExpired:
-            raise TinaError("Tina/Muse completion check timed out") from None
+            raise TinaError("Tina/Muse property check timed out") from None
         if proc.returncode != 0:
-            raise TinaError(f"Completion check failed: {proc.stderr or proc.stdout}")
+            raise TinaError(f"Property check failed: {proc.stderr or proc.stdout}")
         return proc.stdout
 
     with tempfile.TemporaryDirectory() as tmp:
-        source, graph, formulas = (Path(tmp) / name for name in ("net.net", "net.ktz", "completion.mmc"))
+        source, graph, formulas = (Path(tmp) / name for name in ("net.net", "net.ktz", "properties.mmc"))
         source.write_text(to_tina(net), encoding="utf-8")
         digest = run([str(binary), "-NET", "-R", "-ktz", str(source), str(graph)])
         if not re.search(r"^#\s+bounded(?:,|\s)", digest, re.MULTILINE) or not graph.is_file():
-            raise TinaError("Tina did not complete a bounded reachability analysis for completion checking")
+            raise TinaError("Tina did not complete a bounded reachability analysis for property checking")
         # AF/EG include terminal executions. EX/AX treat a deadlock as an
         # implicit self-loop, as in a total Kripke structure (no net arcs added).
         formulas.write_text(
-            "prefix EF g = min x | g \\/ <T>x;\n"
-            "prefix AG g = max x | g /\\ [T]x;\n"
-            "prefix AF g = min x | g \\/ (<T>T /\\ [T]x);\n"
-            "prefix EG g = max x | g /\\ ([T]F \\/ <T>x);\n"
-            "prefix EX g = <T>g \\/ ([T]F /\\ g);\n"
-            "prefix AX g = [T]g /\\ (<T>T \\/ g);\n"
-            "op EU f g = min x | g \\/ (f /\\ <T>x);\n"
-            "op AU f g = min x | g \\/ (f /\\ <T>T /\\ [T]x);\n"
-            f"op IsFinal = {final};\n" + ";\n".join(expressions) + ";\n",
+            _CTL_PRELUDE + f"op IsFinal = {final};\n" + ";\n".join(expressions) + ";\n",
             encoding="utf-8",
         )
         answers = run([str(muse), "-q", "-b", str(graph), str(formulas)]).splitlines()
@@ -215,25 +226,44 @@ def _check_ctl(net: PetriNet, expressions: list[str], tina_bin: str | None, time
         return [answer == "TRUE" for answer in answers]
 
 
+def _check_groups(
+    net: PetriNet, groups: Mapping[str, Mapping[str, str]],
+    tina_bin: str | None, timeout: float | None,
+) -> dict[str, dict[str, bool]]:
+    """Batch named formulas and map answers back to their report sections."""
+    expressions = [formula for properties in groups.values() for formula in properties.values()]
+    answers = iter(_check_ctl(net, expressions, tina_bin, timeout))
+    return {group: {name: next(answers) for name in properties} for group, properties in groups.items()}
+
+
 def check_completion(net: PetriNet, tina_bin: str | None = None, timeout: float | None = None) -> dict[str, bool] | None:
     """Check AG EF IsFinal and AF IsFinal; None means no final declarations."""
     if not net.final_markings and not net.unrestricted_final_markings:
         return None
-    option, inevitable = _check_ctl(net, ["AG (EF IsFinal)", "AF IsFinal"], tina_bin, timeout)
-    return {"option_to_complete": option, "all_traces_complete": inevitable}
+    return _check_groups(net, {"completion": _COMPLETION_PROPERTIES}, tina_bin, timeout)["completion"]
 
 
-def verify_properties(net: PetriNet, tina_bin: str | None = None, timeout: float | None = None):
-    """Check default completion and named CTL properties in one Muse session."""
+def check_deadlocks(net: PetriNet, tina_bin: str | None = None, timeout: float | None = None) -> dict[str, bool]:
+    """Detect reachable terminal markings, including those outside the final set.
+
+    With no final declarations, every deadlock is non-final. A temporal
+    self-loop used by AX/EX does not make a terminal marking non-deadlocked.
+    """
+    return _check_groups(net, {"deadlocks": _DEADLOCK_PROPERTIES}, tina_bin, timeout)["deadlocks"]
+
+
+def verify_properties(
+    net: PetriNet, tina_bin: str | None = None, timeout: float | None = None,
+) -> dict[str, dict[str, bool] | None]:
+    """Return completion, deadlocks, and named properties in one Muse session.
+
+    Each section maps property names to booleans; completion is None when no
+    final declarations exist. The returned sections can be written to JSON.
+    """
     has_finals = bool(net.final_markings or net.unrestricted_final_markings)
-    expressions = ["AG (EF IsFinal)", "AF IsFinal"] if has_finals else []
-    properties = net.ctl_properties
-    expressions.extend(properties.values())
-    if not expressions:
-        return None, {}
-    answers = _check_ctl(net, expressions, tina_bin, timeout)
-    completion = None
-    if has_finals:
-        completion = {"option_to_complete": answers[0], "all_traces_complete": answers[1]}
-        answers = answers[2:]
-    return completion, dict(zip(properties, answers))
+    results = _check_groups(net, {
+        "completion": _COMPLETION_PROPERTIES if has_finals else {},
+        "deadlocks": _DEADLOCK_PROPERTIES,
+        "properties": net.ctl_properties,
+    }, tina_bin, timeout)
+    return {**results, "completion": results["completion"] if has_finals else None}

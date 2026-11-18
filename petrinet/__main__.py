@@ -22,6 +22,7 @@ def _prune_pipeline(net: PetriNet, args, labels):
         "before": {"places": len(net.places), "transitions": len(net.transitions), "arcs": len(net.arcs)},
         "dead_transitions": None, "removed_transitions": None,
         "completion": None,
+        "deadlocks": None,
         "properties": {},
     }
 
@@ -31,11 +32,10 @@ def _prune_pipeline(net: PetriNet, args, labels):
     write_report()
     try:
         dead = tina.dead_transitions(net, args.tina, args.timeout)
-        completion, properties = tina.verify_properties(net, args.tina, args.timeout)
-        report["completion"] = completion
-        report["properties"] = properties
-        pruned = net.without_transitions(dead)
         report["dead_transitions"] = [t.name for t in sorted(dead)]
+        verification = tina.verify_properties(net, args.tina, args.timeout)
+        report.update(verification)
+        pruned = net.without_transitions(dead)
         report["after"] = {"places": len(pruned.places), "transitions": len(pruned.transitions), "arcs": len(pruned.arcs)}
         pruned_dot = to_dot(pruned, transition_labels=labels)
         # Finish rendering before replacing any previous pruned artifacts.
@@ -51,7 +51,7 @@ def _prune_pipeline(net: PetriNet, args, labels):
         report["removed_transitions"] = report["dead_transitions"]
         report["pruned_files"] = list(files)
         write_report()
-        return dead, completion, properties
+        return dead, verification
     except (OSError, PetriNetError, tina.TinaError, GraphvizError) as e:
         report["status"] = "failed"
         report["error"] = str(e)
@@ -66,12 +66,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--emit", "--emit-tina", dest="emit", metavar="FILE", help="write the Tina .net translation to FILE ('-' for stdout) and exit")
     ap.add_argument("--dot", metavar="FILE", help="write the standard net as Graphviz DOT and exit ('-' for stdout)")
     ap.add_argument("--raw-dot", metavar="FILE", help="write raw agent nets as DOT; requires --agentnet")
-    ap.add_argument("--pipeline", metavar="PREFIX", help="draw original nets, check dead transitions and completion, then report removals and draw the pruned net")
+    ap.add_argument("--pipeline", metavar="PREFIX", help="draw original nets, check dead transitions, deadlocks and CTL properties, then report removals and draw the pruned net")
     ap.add_argument("--raw-render", metavar="PREFIX", help="parse and draw only the agent model as DOT and SVG; requires --agentnet")
     ap.add_argument("--render", metavar="PREFIX", help="export Tina .net, DOT, and SVG files using PREFIX; also raw-agent diagrams with --agentnet")
     ap.add_argument("--graphviz", default="dot", metavar="PATH", help="Graphviz dot executable for --render (default: dot)")
     ap.add_argument("--tina", metavar="PATH", help="override the automatically selected Tina executable")
-    ap.add_argument("--timeout", type=float, default=None, help="maximum seconds for each dead-transition or completion check")
+    ap.add_argument("--timeout", type=float, default=None, help="maximum seconds for each dead-transition or combined property check")
     args = ap.parse_args(argv)
 
     if args.pipeline is not None:
@@ -143,9 +143,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         pipeline_check_started = args.pipeline is not None
-        completion = None
         if args.pipeline is not None:
-            dead, completion, properties = _prune_pipeline(net, args, labels)
+            dead, verification = _prune_pipeline(net, args, labels)
         else:
             dead = tina.dead_transitions(net, args.tina, args.timeout)
     except (OSError, ParseError, agentnet.ParseError, agentnet.ConversionError, PetriNetError,
@@ -172,12 +171,16 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("No dead transitions.")
     if args.pipeline is not None:
+        deadlocks = verification["deadlocks"]
+        print("Reachable deadlock: " + ("yes" if deadlocks["reachable"] else "no"))
+        print("Reachable non-final deadlock: " + ("yes" if deadlocks["non_final_reachable"] else "no"))
+        completion = verification["completion"]
         if completion is None:
             print("Completion not checked: no final declarations.")
         else:
             print("Option to complete from every reachable marking: " + ("yes" if completion["option_to_complete"] else "no"))
             print("All traces eventually reach a final marking: " + ("yes" if completion["all_traces_complete"] else "no"))
-        for name, holds in properties.items():
+        for name, holds in verification["properties"].items():
             print(f"CTL {name}: " + ("yes" if holds else "no"))
     return 0
 
