@@ -92,6 +92,8 @@ complete** and **always completes**. Local finals use explicit entries for
 that type; types with no entries are reported as unspecified.
 See [how local finals become CTL checks](agents/completion.md) for a worked
 example, including the zero checks for omitted places.
+The pipeline also reports [per-type deadlocks](agents/deadlocks.md): unfinished
+types that can never participate again.
 
 A loop can prevent eventual completion even when an exit exists. Final
 markings do not stop firing.

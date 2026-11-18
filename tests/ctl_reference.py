@@ -71,4 +71,15 @@ def expected_verification(states, edges, initial, finals, has_finals):
         },
         "properties": {},
         "agent_completion": {},
+        "agent_deadlocks": {},
     }
+
+
+def agent_deadlock_states(states, edges, can_act, finals):
+    """Backward reachability to participation, followed by local-final exemption."""
+    could_act = set(can_act)
+    while True:
+        previous = could_act | {source for source, target in edges if target in could_act}
+        if previous == could_act:
+            return set(states) - could_act - set(finals)
+        could_act = previous

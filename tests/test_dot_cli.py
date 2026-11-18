@@ -99,6 +99,7 @@ class CliTests(unittest.TestCase):
                     "deadlocks": {"reachable": True, "non_final_reachable": False}, "properties": {},
                     "agent_completion": {name: {"can_complete": True, "all_traces_complete": True}
                                          for name in ["Janus", "Thomas"]},
+                    "agent_deadlocks": {"Janus": False, "Thomas": False},
                 }) as verification:
             prefix = Path(tmp) / "new folder" / "example"
             def verify_original_before_check(net, *args):
@@ -114,14 +115,19 @@ class CliTests(unittest.TestCase):
                               "Option to complete from every reachable marking: yes\n"
                               "All traces eventually reach a final marking: yes\n"
                               "Agent Janus: can eventually complete: yes\nAgent Janus: always completes: yes\n"
-                              "Agent Thomas: can eventually complete: yes\nAgent Thomas: always completes: yes\n", ""))
+                              "Agent Thomas: can eventually complete: yes\nAgent Thomas: always completes: yes\n"
+                              "Agent Janus: reachable deadlock: no\nAgent Thomas: reachable deadlock: no\n", ""))
             load.assert_called_once()
             convert.assert_called_once()
             check.assert_called_once()
-            verification.assert_called_once_with(check.call_args.args[0], None, 10, agent_final_clauses={
-                "Janus": ({Place("hjem1"): 0, Place("uni1"): 1},),
-                "Thomas": ({Place("hjem2"): 0, Place("uni2"): 1},),
-            })
+            verification.assert_called_once_with(check.call_args.args[0], None, 10,
+                agent_final_clauses={
+                    "Janus": ({Place("hjem1"): 0, Place("uni1"): 1},),
+                    "Thomas": ({Place("hjem2"): 0, Place("uni2"): 1},),
+                }, agent_transitions={
+                    "Janus": frozenset([Transition("dukOp")]),
+                    "Thomas": frozenset([Transition("dukOp")]),
+                })
             from petrinet.tina import to_tina
             self.assertEqual(Path(f"{prefix}.net").read_text(encoding="utf-8"), to_tina(check.call_args.args[0]))
             self.assertEqual(check.call_args.args[1:], (None, 10))
@@ -361,7 +367,8 @@ class RealGraphvizTests(unittest.TestCase):
                               "Option to complete from every reachable marking: yes\n"
                               "All traces eventually reach a final marking: yes\n"
                               "Agent Janus: can eventually complete: yes\nAgent Janus: always completes: yes\n"
-                              "Agent Thomas: can eventually complete: yes\nAgent Thomas: always completes: yes\n", ""))
+                              "Agent Thomas: can eventually complete: yes\nAgent Thomas: always completes: yes\n"
+                              "Agent Janus: reachable deadlock: no\nAgent Thomas: reachable deadlock: no\n", ""))
             for suffix in [".svg", "-agent.svg"]:
                 self.assertEqual(ElementTree.parse(f"{prefix}{suffix}").getroot().tag,
                                  "{http://www.w3.org/2000/svg}svg")

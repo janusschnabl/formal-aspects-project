@@ -18,7 +18,7 @@ from xml.etree import ElementTree as ET
 
 from petrinet import Marking, Place
 from petrinet import agentnet, tina
-from tests.ctl_reference import expected_verification, satisfying_states
+from tests.ctl_reference import agent_deadlock_states, expected_verification, satisfying_states
 from tests.test_conversion import INDEXED, PAIRS
 
 
@@ -300,6 +300,11 @@ class RealPipelineAuditTests(unittest.TestCase):
                         "can_complete": initial in satisfying_states(states, edges, {"final": local_finals}, ("EF", "final")),
                         "all_traces_complete": initial in satisfying_states(states, edges, {"final": local_finals}, ("AF", "final")),
                     }
+                    can_act = {before for before, members, _, _ in source_edges
+                               if any(owner == agent_name for owner, _ in members)}
+                    expected["agent_deadlocks"][agent_name] = bool(
+                        agent_deadlock_states(states, edges, can_act, local_finals or set())
+                    )
                 expected_dead = sorted(t.name for t, o in construction.transition_origins.items()
                                        if (tuple(sorted(o.global_transition.members)), o.multiplicities) not in fired)
                 if name == "mixed":
@@ -325,6 +330,8 @@ class RealPipelineAuditTests(unittest.TestCase):
                         for key, label in [("can_complete", "can eventually complete"),
                                            ("all_traces_complete", "always completes")]:
                             self.assertIn(f"Agent {agent_name}: {label}: " + ("yes" if local[key] else "no"), proc.stdout)
+                for agent_name, reachable in expected["agent_deadlocks"].items():
+                    self.assertIn(f"Agent {agent_name}: reachable deadlock: " + ("yes" if reachable else "no"), proc.stdout)
                 for key, label in [("reachable", "Reachable deadlock"),
                                    ("non_final_reachable", "Reachable non-final deadlock")]:
                     self.assertIn(f"{label}: " + ("yes" if expected["deadlocks"][key] else "no"), proc.stdout)

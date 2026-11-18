@@ -14,7 +14,7 @@ from .net import PetriNet, PetriNetError
 from .parser import ParseError, load
 
 
-def _prune_pipeline(net: PetriNet, args, labels, agent_final_clauses=None):
+def _prune_pipeline(net: PetriNet, args, labels, agent_final_clauses=None, agent_transitions=None):
     """Analyze after the original exports exist, then save the pruned net."""
     report_path = Path(f"{args.pipeline}-results.json")
     report = {
@@ -23,6 +23,7 @@ def _prune_pipeline(net: PetriNet, args, labels, agent_final_clauses=None):
         "dead_transitions": None, "removed_transitions": None,
         "completion": None,
         "agent_completion": None,
+        "agent_deadlocks": None,
         "deadlocks": None,
         "properties": {},
     }
@@ -35,7 +36,8 @@ def _prune_pipeline(net: PetriNet, args, labels, agent_final_clauses=None):
         dead = tina.dead_transitions(net, args.tina, args.timeout)
         report["dead_transitions"] = [t.name for t in sorted(dead)]
         verification = tina.verify_properties(net, args.tina, args.timeout,
-                                              agent_final_clauses=agent_final_clauses)
+                                              agent_final_clauses=agent_final_clauses,
+                                              agent_transitions=agent_transitions)
         report.update(verification)
         pruned = net.without_transitions(dead)
         report["after"] = {"places": len(pruned.places), "transitions": len(pruned.transitions), "arcs": len(pruned.arcs)}
@@ -148,6 +150,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.pipeline is not None:
             dead, verification = _prune_pipeline(
                 net, args, labels, None if result is None else result.agent_final_clauses,
+                None if result is None else result.agent_transitions,
             )
         else:
             dead = tina.dead_transitions(net, args.tina, args.timeout)
@@ -190,6 +193,8 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(f"Agent {name}: can eventually complete: " + ("yes" if local["can_complete"] else "no"))
                 print(f"Agent {name}: always completes: " + ("yes" if local["all_traces_complete"] else "no"))
+        for name, reachable in (verification["agent_deadlocks"] or {}).items():
+            print(f"Agent {name}: reachable deadlock: " + ("yes" if reachable else "no"))
         for name, holds in verification["properties"].items():
             print(f"CTL {name}: " + ("yes" if holds else "no"))
     return 0

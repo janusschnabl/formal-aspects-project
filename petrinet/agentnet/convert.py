@@ -42,6 +42,15 @@ class ConversionResult:
     transition_origins: dict[Transition, TransitionOrigin]
     agent_final_clauses: dict[str, tuple[dict[Place, int], ...]]
 
+    @property
+    def agent_transitions(self) -> dict[str, frozenset[Transition]]:
+        """Generated transitions involving each type, including read-only members."""
+        participating = {name: set() for name in self.agent_final_clauses}
+        for transition, origin in self.transition_origins.items():
+            for name, _ in origin.global_transition.members:
+                participating[name].add(transition)
+        return {name: frozenset(transitions) for name, transitions in participating.items()}
+
 
 def _name(name: str) -> None:
     try:

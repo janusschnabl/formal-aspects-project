@@ -31,6 +31,7 @@ class VerificationResults(TypedDict):
     deadlocks: dict[str, bool]
     properties: dict[str, bool]
     agent_completion: dict[str, dict[str, bool] | None]
+    agent_deadlocks: dict[str, bool]
 
 
 _BUNDLED_ROOT = Path(__file__).resolve().parent.parent / "tools" / "tina" / "4.0.0"
@@ -46,6 +47,9 @@ _AGENT_COMPLETION_PROPERTIES = {
 _DEADLOCK_PROPERTIES = {
     "reachable": "EF IsDeadlock",
     "non_final_reachable": "EF (IsDeadlock /\\ (- IsFinal))",
+}
+_AGENT_DEADLOCK_PROPERTIES = {
+    "reachable": "EF ((- {final}) /\\ (- EF {can_act}))",
 }
 _CTL_PRELUDE = r"""prefix EF g = min x | g \/ <T>x;
 prefix AG g = max x | g /\ [T]x;
@@ -181,15 +185,25 @@ def dead_transitions(net: PetriNet, tina_bin: str | None = None, timeout: float 
             return _parse_result(stream, net)
 
 
+def _proposition(kind: str, name: str) -> str:
+    # Tina canonicalizes simple names without braces in .ktz files.
+    identifier = name if re.fullmatch(r"[A-Za-z0-9_']+", name) else _identifier(name)
+    return f"{kind}.{identifier}"
+
+
+def _can_act_expression(transitions: Iterable[Transition]) -> str:
+    """A real outgoing edge involving this type; terminal self-loops do not count."""
+    events = " \\/ ".join(_proposition("E", t.name) for t in sorted(set(transitions)))
+    return f"(<({events})>T:S)" if events else "F:S"
+
+
 def _final_expression(clauses: Iterable[Mapping[Place, int]]) -> str:
     """Build a state predicate for a union of explicit place constraints."""
     terms = []
     for clause in clauses:
         constraints = []
         for p, count in sorted(clause.items()):
-            # Tina canonicalizes simple names without braces in .ktz files.
-            name = p.name if re.fullmatch(r"[A-Za-z0-9_']+", p.name) else _identifier(p.name)
-            constraints.append(f"(S.{name} = {count})")
+            constraints.append(f"({_proposition('S', p.name)} = {count})")
         terms.append("(" + " /\\ ".join(constraints) + ")" if constraints else "T:S")
     return " \\/ ".join(sorted(terms)) or "F:S"
 
@@ -272,11 +286,14 @@ def check_deadlocks(net: PetriNet, tina_bin: str | None = None, timeout: float |
 def verify_properties(
     net: PetriNet, tina_bin: str | None = None, timeout: float | None = None,
     *, agent_final_clauses: Mapping[str, Iterable[Mapping[Place, int]]] | None = None,
+    agent_transitions: Mapping[str, Iterable[Transition]] | None = None,
 ) -> VerificationResults:
-    """Check global and per-type completion on one global reachability graph.
+    """Check global and per-type properties on one global reachability graph.
 
     Per-type completion uses EF and AF of the inferred local final predicate.
     A type with no explicit final clauses has a None result.
+    Per-type deadlocks are reachable unfinished states from which participation
+    is permanently impossible. Missing local finals give no completion exemption.
     """
     has_finals = bool(net.final_markings or net.unrestricted_final_markings)
     groups = {
@@ -290,10 +307,19 @@ def verify_properties(
             final = "(" + _final_expression(clauses) + ")"
             groups[f"agent:{name}"] = {key: formula.replace("IsFinal", final)
                                       for key, formula in _AGENT_COMPLETION_PROPERTIES.items()}
+    for name, transitions in sorted((agent_transitions or {}).items()):
+        final = "(" + _final_expression(local_finals.get(name, ())) + ")"
+        can_act = _can_act_expression(transitions)
+        groups[f"agent_deadlock:{name}"] = {
+            key: formula.format(final=final, can_act=can_act)
+            for key, formula in _AGENT_DEADLOCK_PROPERTIES.items()
+        }
     results = _check_groups(net, groups, tina_bin, timeout)
     return {
         "completion": results["completion"] if has_finals else None,
         "deadlocks": results["deadlocks"],
         "properties": results["properties"],
         "agent_completion": {name: results.get(f"agent:{name}") for name in local_finals},
+        "agent_deadlocks": {name: results[f"agent_deadlock:{name}"]["reachable"]
+                            for name in sorted(agent_transitions or {})},
     }
