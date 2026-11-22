@@ -1,0 +1,64 @@
+# Airport turnaround: an indexed family of places and transitions per flight i.
+#   - each flight has one aircraft, starting at the gate
+#   - a shared pool of ground crew (Available) serves all flights; preparing
+#     a flight takes 2 crew: one inspects (and may fail and retry), one cleans
+#   - opening the flight sends one crew member back and keeps one supervising
+#   - passengers move in groups (variable arcs): x at open, y at board, z at
+#     depart; a waiting passenger can silently miss the flight
+#   - board[i] only reads Boarding[i] and Supervising[i]; it does not consume them
+#
+# Transitions with the same label fire together:
+#   prepare[i]: aircraft + crew          open[i]: aircraft + crew + passengers
+#   close[i]:   aircraft + crew          board[i]: aircraft + crew + passengers
+#   depart[i]:  aircraft + passengers
+#
+# Names are global, so the passenger gate place is PaxAtGate[i].
+
+index: F = 1..2
+
+agent: Aircraft
+  places: AtGate[i], Preparing[i], Boarding[i], Ready[i], Departed[i] for i in F
+  transitions: ac_prepare[i], ac_open[i], ac_close[i], ac_board[i], ac_depart[i] for i in F
+  labels: ac_prepare[i]=prepare[i], ac_open[i]=open[i], ac_close[i]=close[i] for i in F
+          ac_board[i]=board[i], ac_depart[i]=depart[i] for i in F
+  arcs: (AtGate[i], ac_prepare[i]) (ac_prepare[i], Preparing[i]) for i in F
+        (Preparing[i], ac_open[i]) (ac_open[i], Boarding[i]) for i in F
+        (Boarding[i], ac_close[i]) (ac_close[i], Ready[i]) for i in F
+        (Ready[i], ac_depart[i]) (ac_depart[i], Departed[i]) for i in F
+  read: (Boarding[i], ac_board[i]) for i in F
+
+agent: Crew
+  places: Available
+          Inspecting[i], Fixing[i], Inspected[i], Cleaning[i], CleanDone[i], Supervising[i] for i in F
+  transitions: crew_prepare[i], inspect_fail[i], retry[i], inspect_pass[i] for i in F
+               clean_done[i], crew_open[i], crew_close[i], crew_board[i] for i in F
+  labels: crew_prepare[i]=prepare[i], crew_open[i]=open[i] for i in F
+          crew_close[i]=close[i], crew_board[i]=board[i] for i in F
+  arcs: (Available, crew_prepare[i], 2) (crew_prepare[i], Inspecting[i]) (crew_prepare[i], Cleaning[i]) for i in F
+        (Inspecting[i], inspect_fail[i]) (inspect_fail[i], Fixing[i]) for i in F
+        (Fixing[i], retry[i]) (retry[i], Inspecting[i]) for i in F
+        (Inspecting[i], inspect_pass[i]) (inspect_pass[i], Inspected[i]) for i in F
+        (Cleaning[i], clean_done[i]) (clean_done[i], CleanDone[i]) for i in F
+        (Inspected[i], crew_open[i]) (CleanDone[i], crew_open[i]) for i in F
+        (crew_open[i], Supervising[i]) (crew_open[i], Available) for i in F
+        (Supervising[i], crew_close[i]) (crew_close[i], Available) for i in F
+  read: (Supervising[i], crew_board[i]) for i in F
+
+agent: Passenger
+  places: Waiting[i], Missed[i], PaxAtGate[i], Boarded[i], Arrived[i] for i in F
+  transitions: miss[i], pax_open[i], pax_board[i], pax_depart[i] for i in F
+  labels: miss[i]=eps, pax_open[i]=open[i] for i in F
+          pax_board[i]=board[i], pax_depart[i]=depart[i] for i in F
+  arcs: (Waiting[i], miss[i]) (miss[i], Missed[i]) for i in F
+        (Waiting[i], pax_open[i], *) (pax_open[i], PaxAtGate[i], *) for i in F
+        (PaxAtGate[i], pax_board[i], *) (pax_board[i], Boarded[i], *) for i in F
+        (Boarded[i], pax_depart[i], *) (pax_depart[i], Arrived[i], *) for i in F
+
+# C = 2 crew, m_1 = 2 and m_2 = 1 passengers.
+initial: Available=2
+         AtGate[i]=1 for i in F
+         Waiting[1]=2, Waiting[2]=1
+
+# Done: every aircraft departed, all crew back, every passenger missed or arrived.
+unrestricted final: Available=2
+                    Departed[i]=1, Waiting[i]=0, PaxAtGate[i]=0, Boarded[i]=0 for i in F

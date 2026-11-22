@@ -14,7 +14,8 @@ from .net import PetriNet, PetriNetError
 from .parser import ParseError, load
 
 
-def _prune_pipeline(net: PetriNet, args, labels, agent_final_clauses=None, agent_transitions=None):
+def _prune_pipeline(net: PetriNet, args, labels, agent_final_clauses=None, agent_transitions=None,
+                    place_groups=None):
     """Analyze after the original exports exist, then save the pruned net."""
     report_path = Path(f"{args.pipeline}-results.json")
     report = {
@@ -41,7 +42,7 @@ def _prune_pipeline(net: PetriNet, args, labels, agent_final_clauses=None, agent
         report.update(verification)
         pruned = net.without_transitions(dead)
         report["after"] = {"places": len(pruned.places), "transitions": len(pruned.transitions), "arcs": len(pruned.arcs)}
-        pruned_dot = to_dot(pruned, transition_labels=labels)
+        pruned_dot = to_dot(pruned, transition_labels=labels, place_groups=place_groups)
         # Finish rendering before replacing any previous pruned artifacts.
         pruned_svg = render_svg(pruned_dot, graphviz_bin=args.graphviz)
         files = {
@@ -123,12 +124,16 @@ def main(argv: list[str] | None = None) -> int:
         else:
             net = load(args.net)
 
+        # Color converted-net places by the agent that owns them.
+        groups = None if result is None else {
+            result.place_map[p]: agent.name for agent in source.agents.values() for p in agent.places
+        }
         outputs = []
         if args.emit is not None:
             outputs.append((args.emit, tina.to_tina(net)))
         if args.dot is not None:
             labels = None if result is None else {t: o.display_name for t, o in result.transition_origins.items()}
-            outputs.append((args.dot, to_dot(net, transition_labels=labels)))
+            outputs.append((args.dot, to_dot(net, transition_labels=labels, place_groups=groups)))
         if args.raw_dot is not None:
             outputs.append((args.raw_dot, to_agent_dot(source)))
         dot_outputs = dict(outputs)
@@ -150,7 +155,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.pipeline is not None:
             dead, verification = _prune_pipeline(
                 net, args, labels, None if result is None else result.agent_final_clauses,
-                None if result is None else result.agent_transitions,
+                None if result is None else result.agent_transitions, groups,
             )
         else:
             dead = tina.dead_transitions(net, args.tina, args.timeout)

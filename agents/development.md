@@ -8,6 +8,12 @@
 - `petrinet/net.py` holds standard-net structure, firing, and final predicates.
 - `petrinet/tina.py` exports nets and calls Tina/Muse.
 - `petrinet/__main__.py` runs exports, verification, reporting, and pruning.
+- `petrinet/dot.py` draws nets. Each agent gets one palette color, assigned in
+  declaration order; `to_dot(place_groups=...)` reuses it for converted nets,
+  and a transition takes a color only when all its places share one agent.
+  Places with tokens in a final declaration are double circles. In agent
+  drawings, dotted `constraint=false` edges join same-label transitions
+  without moving the layout. Keep node label text stable: tests match it.
 
 Conversion preserves place names. Variable arcs are expanded using each agent
 type's initial population; read arcs become matching input/output arcs. Keep
