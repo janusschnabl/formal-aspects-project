@@ -11,11 +11,12 @@ required. Tina and Muse are bundled for Windows and Linux x86-64.
 Run from the project root:
 
 ```sh
-python -m petrinet examples/agents/airport.txt --agentnet --pipeline out/airport --timeout 60
+python -m petrinet examples/agents/airport.txt --agentnet --pipeline out/airport --timeout 60 --verbose
 ```
 
 This draws the model, converts and checks it, then exports a copy with dead
 transitions removed. The source file stays unchanged.
+Remove `--verbose` for shorter terminal output; full traces remain in JSON.
 
 | Output | Contents |
 |---|---|
@@ -29,7 +30,7 @@ DOT sources are saved alongside the diagrams. Open the SVG files in a browser.
 For a standard Petri net, omit `--agentnet`:
 
 ```sh
-python -m petrinet examples/two_dead.txt --pipeline out/two_dead
+python -m petrinet examples/two_dead.txt --pipeline out/two_dead --verbose
 ```
 
 To run individual steps, replace `--pipeline out/airport` with:
@@ -106,6 +107,13 @@ types that can never participate again.
 A loop can prevent eventual completion even when an exit exists. Final
 markings do not stop firing.
 
+Built-in violations include counterexamples in the JSON `traces` list.
+Add `--verbose` (or `-v`) to print the full traces in the terminal too.
+A trace is a run to a bad marking, or a run followed by a cycle to repeat
+forever. Each step records the transition and resulting marking; agent steps
+also identify the source activity and chosen variable weights. An empty run
+starts at an already bad initial marking. Custom CTL results remain booleans.
+
 Both input formats support exact and partial final declarations:
 
 ```text
@@ -134,11 +142,11 @@ Boolean operators are `-`, `/\`, `\/`, and `=>`.
 
 Analysis requires bounded nets. A false property is a verification result;
 unbounded nets, incomplete checks, and tool errors exit with code 2.
-`--timeout 60` limits dead-transition analysis and the combined property check
-to 60 seconds each.
+`--timeout 60` limits dead-transition analysis and the combined property check,
+including traces, to 60 seconds each.
 
-Use `--tina PATH` or `TINA_BIN` for another Tina installation, with Muse
-beside it. Use `--graphviz PATH` to select Graphviz.
+Use `--tina PATH` or `TINA_BIN` for another Tina installation, with Muse,
+pathto, and ktzio beside it. Use `--graphviz PATH` to select Graphviz.
 See [bundled-tool notes](tools/tina/README.md) for platform details.
 
 Run the tests with:

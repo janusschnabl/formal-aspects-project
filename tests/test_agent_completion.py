@@ -149,8 +149,10 @@ class AgentCompletionTests(unittest.TestCase):
             with mock.patch("petrinet.tina.subprocess.run", wraps=subprocess.run) as run:
                 status, stdout, stderr = run_cli([str(source), "--agentnet", "--pipeline", str(prefix), "--timeout", "15"])
             self.assertEqual((status, stderr), (0, ""))
-            # One dead-transition invocation, then one property graph and Muse session.
-            self.assertEqual(run.call_count, 3)
+            # Witnesses reuse the property graph and the single batched verdict check.
+            commands = [call.args[0] for call in run.call_args_list]
+            self.assertEqual(sum(Path(cmd[0]).stem == "tina" for cmd in commands), 2)
+            self.assertEqual(sum(Path(cmd[0]).stem == "muse" and "-b" in cmd for cmd in commands), 1)
             report = json.loads(Path(f"{prefix}-results.json").read_text())
             self.assertEqual(report["agent_completion"], {
                 "Customer": {"initially_final": False, "can_complete": True,

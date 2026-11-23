@@ -42,7 +42,9 @@ class SoundnessTests(unittest.TestCase):
     def test_dead_weight_choices_do_not_make_a_source_activity_dead(self):
         with mock.patch("petrinet.tina.subprocess.run", wraps=subprocess.run) as run:
             report, stdout, pruned = self.pipeline(SOME_DEAD_VARIANTS)
-        self.assertEqual(run.call_count, 3)  # No extra reachability or post-pruning check.
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(sum(Path(cmd[0]).stem == "tina" for cmd in commands), 2)
+        self.assertEqual(sum(Path(cmd[0]).stem == "muse" and "-b" in cmd for cmd in commands), 1)
         self.assertEqual(report["dead_transitions"], ["move__k_A_3"])
         self.assertEqual(report["dead_activities"], [])
         self.assertIs(report["soundness"], True)

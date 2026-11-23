@@ -7,6 +7,7 @@
 - `petrinet/agentnet/convert.py` expands synchronization and variable weights.
 - `petrinet/net.py` holds standard-net structure, firing, and final predicates.
 - `petrinet/tina.py` exports nets and calls Tina/Muse.
+- `petrinet/witness.py` extracts and replays evidence from that same property graph.
 - `petrinet/__main__.py` runs exports, verification, reporting, and pruning.
 - `petrinet/dot.py` draws nets. Each agent gets one palette color, assigned in
   declaration order; `to_dot(place_groups=...)` reuses it for converted nets,
@@ -24,9 +25,10 @@ Pruning preserves places, initial/final declarations, and named properties.
 
 Dead-transition analysis uses Tina's full untimed reachability graph (`-R`).
 The property check builds a second full graph and evaluates all default and
-user formulas in one Muse invocation. Both checks require bounded, completed
-analyses. Each stage gets its own timeout; Tina and Muse share the property
-stage's time allowance.
+user verdicts in one Muse invocation. Counterexamples reuse that graph, with
+up to two further Muse state-set queries, one ktzio JSON export, and cached
+pathto paths. Both checks require bounded, completed analyses. Each stage gets
+its own timeout; all property and witness work shares the property allowance.
 
 Built-in formulas live in `_COMPLETION_PROPERTIES`, `_AGENT_COMPLETION_PROPERTIES`,
 and `_DEADLOCK_PROPERTIES`.
@@ -44,6 +46,7 @@ User properties need only a `ctl: name = formula` line.
 | `properties` | User property names mapped to booleans |
 | `agent_completion` | Per-type `initially_final`, `can_complete`, `option_to_complete`, `all_traces_complete`; `None` per type without local finals |
 | `agent_deadlocks` | Per-type boolean: a reachable unfinished state permanently prevents participation |
+| `traces` | Evidence records when `include_traces=True`; enabled by the pipeline |
 
 `check_completion()` and `check_deadlocks()` run only their respective group.
 The default CLI without export flags checks only dead transitions; the full
@@ -76,8 +79,9 @@ Semantics to preserve:
 - Boolean syntax follows Muse: `-`, `/\`, `\/`, `=>`. Until is written
   `EU condition target` or `AU condition target`. Names such as `S.{p[1]}`
   reference indexed places. Identifiers must match Tina's quoted-name handling.
-- Results are booleans. LTL, fairness, timed properties, and witness paths are
-  not currently exposed by the application.
+- Verdicts are booleans. Built-in violations also have evidence when traces
+  are requested; see [Witnesses](witnesses.md). Arbitrary user CTL, LTL,
+  fairness, and timed counterexample generation are not supported.
 
 ## Pipeline reports and files
 
@@ -105,6 +109,8 @@ reports source-activity coverage separately, including when none are dead.
 optional CTL properties, and soundness under separate headings. Soundness shows
 each requirement as PASS/FAIL (SKIP for missing global finals), lists every
 deadlocked type, and identifies dead activities by name and local members.
+Counterexamples are summarized by count by default. `-v` / `--verbose` prints
+their runs, cycles, and markings; full evidence is always saved in JSON.
 Initial local-final membership is reported per type as `initially_final`,
 evaluated in the same Muse session as the temporal queries. The CLI prints
 `Initial marking is locally final: yes/no` for types with local finals; missing
@@ -127,6 +133,9 @@ covered separately. Upstream manuals are under `tools/tina/4.0.0/`.
   states, edges, removals, completion, and deadlock verdicts.
 - `tests/ctl_reference.py` is test-only. It evaluates CTL on finite graphs with
   Python sets, independently of production firing and Muse definitions.
+- `test_witness.py` validates paths, cycles, and bad endpoint predicates against
+  independently fired source graphs for all three scenarios. It also covers
+  zero-step evidence, source weights, helper failures, and the shared timeout.
 - `test_completion.py` compares Muse against that evaluator on small graphs,
   checks terminal-state semantics, and tests failures after successful
   dead-transition analysis. Preserve the independent expected results when

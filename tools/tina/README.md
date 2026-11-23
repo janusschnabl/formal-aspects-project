@@ -31,8 +31,10 @@ The resolver restores user execute permission on the bundled Linux checker
 when needed, including after a Git checkout created on Windows. Paths are
 resolved relative to the project files, so the Python API also works from
 other working directories. Dead-transition analysis uses `tina`; property
-verification also uses the `muse` executable beside it. Do not mix binaries
-or support files from the two platforms.
+verification also uses the `muse` executable beside it. Counterexamples use
+`pathto` and `ktzio` from that same directory, reusing the property graph.
+Missing Linux execute permissions are restored for these bundled helpers too.
+Do not mix binaries or support files from the two platforms.
 
 The original Windows download has been copied into the project. Archive source
 URLs and SHA-256 hashes are recorded in `4.0.0/provenance.json`. The archives

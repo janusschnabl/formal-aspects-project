@@ -155,7 +155,7 @@ class CliTests(unittest.TestCase):
                 }, agent_transitions={
                     "Janus": frozenset([Transition("dukOp")]),
                     "Thomas": frozenset([Transition("dukOp")]),
-                })
+                }, include_traces=True)
             from petrinet.tina import to_tina
             self.assertEqual(Path(f"{prefix}.net").read_text(encoding="utf-8"), to_tina(check.call_args.args[0]))
             # Without removals, pruning must retain agent colors and labels.

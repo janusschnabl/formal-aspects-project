@@ -20,18 +20,23 @@ import time
 from typing import TypedDict
 
 from .net import PetriNet, Place, Transition
+from . import witness
 
 
 class TinaError(RuntimeError):
     pass
 
 
-class VerificationResults(TypedDict):
+class _VerificationVerdicts(TypedDict):
     completion: dict[str, bool] | None
     deadlocks: dict[str, bool]
     properties: dict[str, bool]
     agent_completion: dict[str, dict[str, bool] | None]
     agent_deadlocks: dict[str, bool]
+
+
+class VerificationResults(_VerificationVerdicts, total=False):
+    traces: list[dict]
 
 
 _BUNDLED_ROOT = Path(__file__).resolve().parent.parent / "tools" / "tina" / "4.0.0"
@@ -210,7 +215,19 @@ def _final_expression(clauses: Iterable[Mapping[Place, int]]) -> str:
     return " \\/ ".join(sorted(terms)) or "F:S"
 
 
-def _check_ctl(net: PetriNet, expressions: list[str], tina_bin: str | None, timeout: float | None) -> list[bool]:
+def _companion_tool(binary: Path, name: str) -> Path:
+    tool = binary.with_name(name + (".exe" if binary.suffix.lower() == ".exe" else ""))
+    if (sys.platform == "linux" and tool.parent == (_BUNDLED_ROOT / "linux-amd64" / "bin").resolve()
+            and tool.is_file() and not os.access(tool, os.X_OK)):
+        try:
+            tool.chmod(tool.stat().st_mode | 0o100)
+        except OSError as e:
+            raise TinaError(f"cannot make bundled {name} executable: {e}") from None
+    return tool
+
+
+def _check_ctl(net: PetriNet, expressions: list[str], tina_bin: str | None, timeout: float | None,
+               *, trace_groups=None, traces=None) -> list[bool]:
     """Evaluate CTL expressions at the initial state of Tina's full graph."""
     clauses = [{p: marking[p] for p in net.places} for marking in net.final_markings]
     clauses.extend(net.unrestricted_final_markings)
@@ -218,21 +235,17 @@ def _check_ctl(net: PetriNet, expressions: list[str], tina_bin: str | None, time
 
     executable = resolve_executable(tina_bin)
     binary = Path(shutil.which(executable) or executable).resolve()
-    muse = binary.with_name("muse.exe" if binary.suffix.lower() == ".exe" else "muse")
-    if (sys.platform == "linux" and muse.parent == (_BUNDLED_ROOT / "linux-amd64" / "bin").resolve()
-            and muse.is_file() and not os.access(muse, os.X_OK)):
-        try:
-            muse.chmod(muse.stat().st_mode | 0o100)
-        except OSError as e:
-            raise TinaError(f"cannot make bundled Muse executable: {e}") from None
     deadline = None if timeout is None else time.monotonic() + timeout
 
-    def run(cmd):
+    def remaining_time():
         remaining = None if deadline is None else max(0, deadline - time.monotonic())
         if remaining == 0:
-            raise TinaError("Tina/Muse property check timed out")
+            raise TinaError("Tina/Muse property check timed out (including trace extraction)")
+        return remaining
+
+    def run(cmd):
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=remaining)
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=remaining_time())
         except FileNotFoundError:
             raise TinaError(f"Property-check executable {cmd[0]!r} not found") from None
         except subprocess.TimeoutExpired:
@@ -249,23 +262,31 @@ def _check_ctl(net: PetriNet, expressions: list[str], tina_bin: str | None, time
             raise TinaError("Tina did not complete a bounded reachability analysis for property checking")
         # AF/EG include terminal executions. EX/AX treat a deadlock as an
         # implicit self-loop, as in a total Kripke structure (no net arcs added).
-        formulas.write_text(
-            _CTL_PRELUDE + f"op IsFinal = {final};\n" + ";\n".join(expressions) + ";\n",
-            encoding="utf-8",
-        )
-        answers = run([str(muse), "-q", "-b", str(graph), str(formulas)]).splitlines()
+        prelude = _CTL_PRELUDE + f"op IsFinal = {final};\n"
+        formulas.write_text(prelude + ";\n".join(expressions) + ";\n", encoding="utf-8")
+        tool = lambda name: _companion_tool(binary, name)
+        answers = run([str(tool("muse")), "-q", "-b", str(graph), str(formulas)]).splitlines()
         if len(answers) != len(expressions) or any(answer not in {"TRUE", "FALSE"} for answer in answers):
             raise TinaError("could not read Muse CTL results: " + "\n".join(answers))
-        return [answer == "TRUE" for answer in answers]
+        verdicts = [answer == "TRUE" for answer in answers]
+        if traces is not None:
+            try:
+                traces.extend(witness.collect(net, trace_groups, verdicts, graph=graph, formulas=formulas,
+                                              prelude=prelude, run=run, tool=tool,
+                                              identifier=lambda name: _proposition("S", name)[2:],
+                                              check_timeout=remaining_time))
+            except witness.WitnessError as e:
+                raise TinaError(str(e)) from e
+        return verdicts
 
 
 def _check_groups(
     net: PetriNet, groups: Mapping[str, Mapping[str, str]],
-    tina_bin: str | None, timeout: float | None,
+    tina_bin: str | None, timeout: float | None, *, traces=None,
 ) -> dict[str, dict[str, bool]]:
     """Batch named formulas and map answers back to their report sections."""
     expressions = [formula for properties in groups.values() for formula in properties.values()]
-    answers = iter(_check_ctl(net, expressions, tina_bin, timeout))
+    answers = iter(_check_ctl(net, expressions, tina_bin, timeout, trace_groups=groups, traces=traces))
     return {group: {name: next(answers) for name in properties} for group, properties in groups.items()}
 
 
@@ -289,6 +310,7 @@ def verify_properties(
     net: PetriNet, tina_bin: str | None = None, timeout: float | None = None,
     *, agent_final_clauses: Mapping[str, Iterable[Mapping[Place, int]]] | None = None,
     agent_transitions: Mapping[str, Iterable[Transition]] | None = None,
+    include_traces: bool = False,
 ) -> VerificationResults:
     """Check global and per-type properties on one global reachability graph.
 
@@ -297,6 +319,8 @@ def verify_properties(
     A type with no explicit final clauses has a None result.
     Per-type deadlocks are reachable unfinished states from which participation
     is permanently impossible. Missing local finals give no completion exemption.
+    With include_traces, add replayed evidence for built-in violations using
+    this same graph. Arbitrary user CTL formulas retain boolean results only.
     """
     has_finals = bool(net.final_markings or net.unrestricted_final_markings)
     groups = {
@@ -317,8 +341,9 @@ def verify_properties(
             key: formula.format(final=final, can_act=can_act)
             for key, formula in _AGENT_DEADLOCK_PROPERTIES.items()
         }
-    results = _check_groups(net, groups, tina_bin, timeout)
-    return {
+    traces = [] if include_traces else None
+    results = _check_groups(net, groups, tina_bin, timeout, traces=traces)
+    verification: VerificationResults = {
         "completion": results["completion"] if has_finals else None,
         "deadlocks": results["deadlocks"],
         "properties": results["properties"],
@@ -326,3 +351,6 @@ def verify_properties(
         "agent_deadlocks": {name: results[f"agent_deadlock:{name}"]["reachable"]
                             for name in sorted(agent_transitions or {})},
     }
+    if traces is not None:
+        verification["traces"] = traces
+    return verification

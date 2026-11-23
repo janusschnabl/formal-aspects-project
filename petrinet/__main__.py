@@ -14,7 +14,7 @@ from .net import PetriNet, PetriNetError
 from .parser import ParseError, load
 
 
-def _print_pipeline_report(report, *, agent_model: bool):
+def _print_pipeline_report(report, *, agent_model: bool, verbose: bool = False):
     """Group completed results and explain each failed soundness requirement."""
     def section(title):
         print(title)
@@ -68,6 +68,36 @@ def _print_pipeline_report(report, *, agent_model: bool):
         for name, holds in report["properties"].items():
             check(name, holds)
 
+    if report.get("traces") and not verbose:
+        print()
+        print(f"Counterexamples: {len(report['traces'])} (use --verbose to show; full traces are saved in JSON).")
+
+    if report.get("traces") and verbose:
+        print()
+        section("Counterexamples")
+
+        def steps_text(steps):
+            names = []
+            for step in steps:
+                name = step.get("activity", step["transition"])
+                if step.get("weights"):
+                    name += " (" + ", ".join(f"{key}={value}" for key, value in step["weights"].items()) + ")"
+                names.append(name)
+            return " -> ".join(names) or "(initial marking)"
+
+        for trace in report["traces"]:
+            scope = trace["section"] + (f".{trace['agent']}" if "agent" in trace else "")
+            print(f"  {scope}.{trace['property']}")
+            if trace["kind"] != "unreachable":
+                print(f"    Run: {steps_text(trace['prefix'])}")
+                if trace["cycle"]:
+                    print(f"    Repeat forever: {steps_text(trace['cycle'])}")
+                elif trace["kind"] == "deadlock":
+                    print("    Ends in a deadlock.")
+            marking = ", ".join(f"{p}={n}" for p, n in trace["marking"].items()) or "(all places empty)"
+            print(f"    Marking: {marking}")
+            print(f"    {trace['reason']}")
+
     if agent_model:
         print()
         section("Soundness")
@@ -109,6 +139,7 @@ def _prune_pipeline(net: PetriNet, args, labels, conversion: agentnet.Conversion
         "agent_deadlocks": None,
         "deadlocks": None,
         "properties": {},
+        "traces": None,
     }
 
     def write_report():
@@ -126,8 +157,16 @@ def _prune_pipeline(net: PetriNet, args, labels, conversion: agentnet.Conversion
             ]
         verification = tina.verify_properties(net, args.tina, args.timeout,
                                               agent_final_clauses=None if conversion is None else conversion.agent_final_clauses,
-                                              agent_transitions=None if conversion is None else conversion.agent_transitions)
+                                              agent_transitions=None if conversion is None else conversion.agent_transitions,
+                                              include_traces=True)
         report.update(verification)
+        if conversion is not None:
+            origins = {t.name: origin for t, origin in conversion.transition_origins.items()}
+            for trace in report.get("traces") or []:
+                for step in trace["prefix"] + trace["cycle"]:
+                    origin = origins[step["transition"]]
+                    step["activity"] = origin.global_transition.name
+                    step["weights"] = {f"{a}.{t}": k for (a, t), k in origin.multiplicities}
         if conversion is not None and verification["completion"] is not None:
             report["soundness"] = (
                 verification["completion"]["option_to_complete"]
@@ -166,6 +205,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dot", metavar="FILE", help="write the standard net as Graphviz DOT and exit ('-' for stdout)")
     ap.add_argument("--raw-dot", metavar="FILE", help="write raw agent nets as DOT; requires --agentnet")
     ap.add_argument("--pipeline", metavar="PREFIX", help="draw original nets, check dead transitions, deadlocks, agent soundness and CTL properties, then draw the pruned net")
+    ap.add_argument("-v", "--verbose", action="store_true", help="show full counterexample runs in pipeline output")
     ap.add_argument("--raw-render", metavar="PREFIX", help="parse and draw only the agent model as DOT and SVG; requires --agentnet")
     ap.add_argument("--render", metavar="PREFIX", help="export Tina .net, DOT, and SVG files using PREFIX; also raw-agent diagrams with --agentnet")
     ap.add_argument("--graphviz", default="dot", metavar="PATH", help="Graphviz dot executable for --render (default: dot)")
@@ -262,6 +302,7 @@ def main(argv: list[str] | None = None) -> int:
                         "status": "failed", "input": args.net, "error": str(e),
                         "dead_transitions": None, "removed_transitions": None,
                         "dead_activities": None, "soundness": None,
+                        "traces": None,
                     }, indent=2) + "\n", encoding="utf-8")
                 except OSError:
                     pass  # Preserve the original error if the report is unwritable.
@@ -269,7 +310,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.pipeline is not None:
-        _print_pipeline_report(verification, agent_model=args.agentnet)
+        _print_pipeline_report(verification, agent_model=args.agentnet, verbose=args.verbose)
     elif dead:
         print("Dead converted transitions:" if args.agentnet else "Dead transitions:")
         for t in dead:
