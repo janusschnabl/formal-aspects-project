@@ -66,7 +66,8 @@ class AgentCompletionTests(unittest.TestCase):
                 result = self.verify("agent: A\nplaces: ready done stuck\n" + behavior
                                      + "initial: ready=1\nfinal: done=1\n")
                 self.assertEqual(result["agent_completion"], {
-                    "A": {"can_complete": possible, "option_to_complete": option, "all_traces_complete": inevitable},
+                    "A": {"initially_final": False, "can_complete": possible,
+                          "option_to_complete": option, "all_traces_complete": inevitable},
                 })
                 if name == "bad-branch":
                     self.assertFalse(result["completion"]["option_to_complete"])
@@ -78,7 +79,8 @@ class AgentCompletionTests(unittest.TestCase):
                              "initial: ready=1 idle=1\nunrestricted final: done=1\n")
         # The resource can loop forever, starving A, despite A's acyclic local net.
         self.assertEqual(result["agent_completion"], {
-            "A": {"can_complete": True, "option_to_complete": True, "all_traces_complete": False}, "Resource": None,
+            "A": {"initially_final": False, "can_complete": True,
+                  "option_to_complete": True, "all_traces_complete": False}, "Resource": None,
         })
 
     def test_local_completion_can_hold_when_global_exact_final_is_unreachable(self):
@@ -87,7 +89,8 @@ class AgentCompletionTests(unittest.TestCase):
                              "agent: Resource\nplaces: idle\ninitial: ready=1 idle=1\nfinal: done=1\n")
         self.assertEqual(result["completion"], {"option_to_complete": False, "all_traces_complete": False})
         self.assertEqual(result["agent_completion"], {
-            "A": {"can_complete": True, "option_to_complete": True, "all_traces_complete": True}, "Resource": None,
+            "A": {"initially_final": False, "can_complete": True,
+                  "option_to_complete": True, "all_traces_complete": True}, "Resource": None,
         })
 
     def test_exact_and_partial_local_finals_have_distinct_zero_semantics(self):
@@ -95,7 +98,8 @@ class AgentCompletionTests(unittest.TestCase):
             with self.subTest(declaration=declaration):
                 result = self.verify("agent: A\nplaces: ready done\ninitial: ready=1 done=1\n" + declaration)
                 self.assertEqual(result["agent_completion"]["A"], {
-                    "can_complete": holds, "option_to_complete": holds, "all_traces_complete": holds,
+                    "initially_final": holds, "can_complete": holds,
+                    "option_to_complete": holds, "all_traces_complete": holds,
                 })
 
     def test_alternative_local_finals_do_not_mix_global_alternatives(self):
@@ -105,18 +109,21 @@ class AgentCompletionTests(unittest.TestCase):
                              "final: a_done=1 b_cancelled=1\nfinal: a_cancelled=1 b_done=1\n")
         self.assertEqual(result["completion"], {"option_to_complete": False, "all_traces_complete": False})
         self.assertEqual(result["agent_completion"], {
-            name: {"can_complete": True, "option_to_complete": True, "all_traces_complete": True} for name in ["A", "B"]
+            name: {"initially_final": True, "can_complete": True,
+                   "option_to_complete": True, "all_traces_complete": True} for name in ["A", "B"]
         })
 
     def test_explicit_zero_local_final_and_completion_at_time_zero(self):
         result = self.verify("agent: A\nplaces: p\nagent: B\nplaces: q\nfinal: p=0\n")
         self.assertEqual(result["agent_completion"], {
-            "A": {"can_complete": True, "option_to_complete": True, "all_traces_complete": True}, "B": None,
+            "A": {"initially_final": True, "can_complete": True,
+                  "option_to_complete": True, "all_traces_complete": True}, "B": None,
         })
         result = self.verify("agent: A\nplaces: done left\ntransitions: leave\n"
                              "arcs: (done,leave) (leave,left)\ninitial: done=1\nfinal: done=1\n")
         self.assertEqual(result["agent_completion"]["A"], {
-            "can_complete": True, "option_to_complete": False, "all_traces_complete": True,
+            "initially_final": True, "can_complete": True,
+            "option_to_complete": False, "all_traces_complete": True,
         })
 
     def test_synchronization_partners_determine_local_completion(self):
@@ -128,7 +135,8 @@ class AgentCompletionTests(unittest.TestCase):
                                      "labels: sell=serve\nread: (open,sell)\n"
                                      f"initial: {initial}\nunrestricted final: served=1\n")
                 self.assertEqual(result["agent_completion"], {
-                    "Customer": {"can_complete": holds, "option_to_complete": holds, "all_traces_complete": holds}, "Clerk": None,
+                    "Customer": {"initially_final": False, "can_complete": holds,
+                                 "option_to_complete": holds, "all_traces_complete": holds}, "Clerk": None,
                 })
 
     def test_pipeline_reports_indexed_local_completion_in_one_property_session(self):
@@ -145,9 +153,11 @@ class AgentCompletionTests(unittest.TestCase):
             self.assertEqual(run.call_count, 3)
             report = json.loads(Path(f"{prefix}-results.json").read_text())
             self.assertEqual(report["agent_completion"], {
-                "Customer": {"can_complete": True, "option_to_complete": True, "all_traces_complete": True}, "Resource": None,
+                "Customer": {"initially_final": False, "can_complete": True,
+                             "option_to_complete": True, "all_traces_complete": True}, "Resource": None,
             })
-            self.assertIn("  Customer\n    Can complete from initial marking: yes", stdout)
+            self.assertIn("  Customer\n    Initial marking is locally final: no", stdout)
+            self.assertIn("    Can complete from initial marking: yes", stdout)
             self.assertIn("    Option to complete from every reachable marking: yes", stdout)
             self.assertIn("    All traces reach a local final: yes", stdout)
             self.assertIn("  Resource\n    Completion not checked: no explicit final declarations.", stdout)
@@ -157,9 +167,12 @@ class AgentCompletionTests(unittest.TestCase):
         result = self.verify(source.read_text(encoding="utf-8"))
         self.assertFalse(result["completion"]["option_to_complete"])
         self.assertEqual(result["agent_completion"], {
-            "Aircraft": {"can_complete": True, "option_to_complete": False, "all_traces_complete": False},
-            "Crew": {"can_complete": True, "option_to_complete": False, "all_traces_complete": True},
-            "Passenger": {"can_complete": True, "option_to_complete": False, "all_traces_complete": False},
+            "Aircraft": {"initially_final": False, "can_complete": True,
+                         "option_to_complete": False, "all_traces_complete": False},
+            "Crew": {"initially_final": True, "can_complete": True,
+                     "option_to_complete": False, "all_traces_complete": True},
+            "Passenger": {"initially_final": False, "can_complete": True,
+                          "option_to_complete": False, "all_traces_complete": False},
         })
 
 

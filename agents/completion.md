@@ -38,16 +38,20 @@ source name to the corresponding place in the converted Petri net.
 The checker translates the stored constraints into queries equivalent to:
 
 ```text
+((S.waiting = 0) /\ (S.done = 3))
 EF ((S.waiting = 0) /\ (S.done = 3))
 AG (EF ((S.waiting = 0) /\ (S.done = 3)))
 AF ((S.waiting = 0) /\ (S.done = 3))
 ```
 
 `S.waiting` and `S.done` are the token counts at a global state. The omitted
-place is therefore checked by the explicit equality `S.waiting = 0` in all three
+place is therefore checked by the explicit equality `S.waiting = 0` in all four
 queries. Every other omitted place owned by Customer gets the same zero check.
 Places owned by other types are unconstrained by Customer's local condition.
 
+- **Initial marking is locally final (`LocalFinal`):** the initial marking
+  already satisfies this type's local final condition. JSON records this as
+  `agent_completion[type]["initially_final"]`.
 - **Can complete from initial marking (`EF`):** some execution from the initial
   state reaches this local condition.
 - **Option to complete from every reachable marking (`AG EF`):** at every
@@ -62,6 +66,8 @@ routes back makes it false. Finals do not disable transitions, and none of
 these properties requires staying final after reaching it.
 
 For the airport model, Crew is locally final initially because `Available=2`.
+The CLI reports `Initial marking is locally final: yes` for Crew and `no` for
+Aircraft and Passenger.
 Thus `all traces reach a local final` is true, but its `option_to_complete` is
 false: if all passengers miss their flights, the crew can prepare a flight and
 become stuck with no route back to `Available=2`. Aircraft and Passenger also
@@ -70,8 +76,9 @@ execution.
 
 ## Unrestricted finals and missing declarations
 
-With `unrestricted final: done=3`, `waiting` remains unconstrained. The local
-queries use `EF (S.done = 3)`, `AG (EF (S.done = 3))`, and `AF (S.done = 3)`.
+With `unrestricted final: done=3`, `waiting` remains unconstrained. The initial
+check uses `S.done = 3`; the temporal queries use `EF (S.done = 3)`,
+`AG (EF (S.done = 3))`, and `AF (S.done = 3)`.
 
 A declaration contributes a local final only if it explicitly mentions a
 place owned by that type. An explicit `waiting=0` counts as a mention; the
@@ -91,8 +98,9 @@ matching local alternatives does not establish global completion.
 3. [__main__.py](../petrinet/__main__.py) passes the net and these clauses to
    `verify_properties(agent_final_clauses=...)`.
 4. [tina.py](../petrinet/tina.py) translates the clauses with `_final_expression`
-   and evaluates per-type EF/AG EF/AF, global checks, and custom properties in one
-   Muse session. Results are recorded under `agent_completion` in the JSON.
+   and evaluates the local final predicate initially, per-type EF/AG EF/AF,
+   global checks, and custom properties in one Muse session. Results are
+   recorded under `agent_completion` in the JSON.
 
 The global option-to-complete check uses `AG EF IsFinal` and is required by
 [soundness](soundness.md). It requires a path to a whole global final from every

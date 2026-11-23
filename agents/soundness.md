@@ -31,10 +31,12 @@ their flights and an aircraft can no longer open boarding.
 
 ## Global and per-type completion
 
-The [per-type completion results](completion.md) report three separate properties:
+The [per-type completion results](completion.md) report initial local-final
+membership and three temporal properties:
 
 | JSON field | Formula | Meaning |
 |---|---|---|
+| `initially_final` | `LocalFinal` | The initial marking already satisfies the type's local final condition |
 | `can_complete` | `EF LocalFinal` | Some execution from the initial state reaches the type's local final |
 | `option_to_complete` | `AG EF LocalFinal` | The type's local final remains reachable from every reachable global marking |
 | `all_traces_complete` | `AF LocalFinal` | Every execution from the initial state reaches the type's local final at least once |

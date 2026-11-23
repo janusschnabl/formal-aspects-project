@@ -42,7 +42,7 @@ User properties need only a `ctl: name = formula` line.
 | `completion` | `option_to_complete`, `all_traces_complete`; `None` without finals |
 | `deadlocks` | `reachable`, `non_final_reachable` |
 | `properties` | User property names mapped to booleans |
-| `agent_completion` | Per-type `can_complete`, `option_to_complete`, `all_traces_complete`; `None` per type without local finals |
+| `agent_completion` | Per-type `initially_final`, `can_complete`, `option_to_complete`, `all_traces_complete`; `None` per type without local finals |
 | `agent_deadlocks` | Per-type boolean: a reachable unfinished state permanently prevents participation |
 
 `check_completion()` and `check_deadlocks()` run only their respective group.
@@ -105,8 +105,11 @@ reports source-activity coverage separately, including when none are dead.
 optional CTL properties, and soundness under separate headings. Soundness shows
 each requirement as PASS/FAIL (SKIP for missing global finals), lists every
 deadlocked type, and identifies dead activities by name and local members.
-These explanations use the existing results; the JSON schema and verdict
-aggregation are unchanged.
+Initial local-final membership is reported per type as `initially_final`,
+evaluated in the same Muse session as the temporal queries. The CLI prints
+`Initial marking is locally final: yes/no` for types with local finals; missing
+local finals remain unspecified. Soundness aggregation uses the global
+completion option, per-type deadlocks, and source-activity coverage.
 
 `.net` files contain Tina structure only. Finals and CTL declarations remain
 Python metadata and appear in diagrams/reports as appropriate. The Python CLI

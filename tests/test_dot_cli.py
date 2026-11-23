@@ -27,14 +27,15 @@ EXAMPLE_PIPELINE_OUTPUT = """Global verification
 
 Agent verification
 ------------------
-  The initial marking may already satisfy an agent type's local final condition.
   Janus
+    Initial marking is locally final: no
     Can complete from initial marking: yes
     Option to complete from every reachable marking: yes
     All traces reach a local final: yes
     Reachable deadlock: no
 
   Thomas
+    Initial marking is locally final: no
     Can complete from initial marking: yes
     Option to complete from every reachable marking: yes
     All traces reach a local final: yes
@@ -129,7 +130,8 @@ class CliTests(unittest.TestCase):
                 mock.patch("petrinet.__main__.tina.verify_properties", return_value={
                     "completion": {"option_to_complete": True, "all_traces_complete": True},
                     "deadlocks": {"reachable": True, "non_final_reachable": False}, "properties": {},
-                    "agent_completion": {name: {"can_complete": True, "option_to_complete": True, "all_traces_complete": True}
+                    "agent_completion": {name: {"initially_final": False, "can_complete": True,
+                                                "option_to_complete": True, "all_traces_complete": True}
                                          for name in ["Janus", "Thomas"]},
                     "agent_deadlocks": {"Janus": False, "Thomas": False},
                 }) as verification:

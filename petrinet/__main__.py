@@ -42,7 +42,6 @@ def _print_pipeline_report(report, *, agent_model: bool):
     if agent_model:
         print()
         section("Agent verification")
-        print("  The initial marking may already satisfy an agent type's local final condition.")
         local_completion = report["agent_completion"] or {}
         local_deadlocks = report["agent_deadlocks"] or {}
         names = sorted(local_completion.keys() | local_deadlocks.keys())
@@ -56,6 +55,7 @@ def _print_pipeline_report(report, *, agent_model: bool):
             if local is None:
                 print("    Completion not checked: no explicit final declarations.")
             else:
+                check("Initial marking is locally final", local["initially_final"], "    ")
                 check("Can complete from initial marking", local["can_complete"], "    ")
                 check("Option to complete from every reachable marking", local["option_to_complete"], "    ")
                 check("All traces reach a local final", local["all_traces_complete"], "    ")

@@ -93,9 +93,10 @@ The pipeline reports:
 
 With `--agentnet`, each type reports whether its **local final** can be reached
 from the initial marking, remains reachable from every reachable marking, and
-is reached on every trace. The initial marking counts as reaching a local
-final. Soundness requires a **global final** to remain reachable. Local finals
-use explicit entries for that type; types with no entries are unspecified.
+is reached on every trace. It also reports whether the initial marking is
+locally final for each type. Soundness requires a **global final** to remain
+reachable. Local finals use explicit entries for that type; types with no
+entries are unspecified.
 See [how local finals become CTL checks](agents/completion.md) for a worked
 example, including the zero checks for omitted places.
 The pipeline also reports [per-type deadlocks](agents/deadlocks.md): unfinished

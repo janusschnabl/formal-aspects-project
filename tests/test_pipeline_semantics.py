@@ -297,6 +297,7 @@ class RealPipelineAuditTests(unittest.TestCase):
                 for agent_name, agent in source.agents.items():
                     local_finals = reference_agent_finals(source, agent, states)
                     expected["agent_completion"][agent_name] = None if local_finals is None else {
+                        "initially_final": initial in local_finals,
                         "can_complete": initial in satisfying_states(states, edges, {"final": local_finals}, ("EF", "final")),
                         "option_to_complete": initial in satisfying_states(states, edges, {"final": local_finals}, ("AG", ("EF", "final"))),
                         "all_traces_complete": initial in satisfying_states(states, edges, {"final": local_finals}, ("AF", "final")),
@@ -345,7 +346,8 @@ class RealPipelineAuditTests(unittest.TestCase):
                     if local is None:
                         self.assertIn("    Completion not checked: no explicit final declarations.", agent_output)
                     else:
-                        for key, label in [("can_complete", "Can complete from initial marking"),
+                        for key, label in [("initially_final", "Initial marking is locally final"),
+                                           ("can_complete", "Can complete from initial marking"),
                                            ("option_to_complete", "Option to complete from every reachable marking"),
                                            ("all_traces_complete", "All traces reach a local final")]:
                             self.assertIn(f"    {label}: " + ("yes" if local[key] else "no"), agent_output)
