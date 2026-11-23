@@ -11,7 +11,7 @@ required. Tina and Muse are bundled for Windows and Linux x86-64.
 Run from the project root:
 
 ```sh
-python -m petrinet examples/agents/example.txt --agentnet --pipeline out/example --timeout 60
+python -m petrinet examples/agents/airport.txt --agentnet --pipeline out/airport --timeout 60
 ```
 
 This draws the model, converts and checks it, then exports a copy with dead
@@ -19,10 +19,10 @@ transitions removed. The source file stays unchanged.
 
 | Output | Contents |
 |---|---|
-| `out/example-agent.svg` | Original agent model |
-| `out/example.svg`, `out/example.net` | Converted net |
-| `out/example-pruned.svg`, `out/example-pruned.net` | Net after removing dead transitions |
-| `out/example-results.json` | Verification results and removed transitions |
+| `out/airport-agent.svg` | Original agent model |
+| `out/airport.svg`, `out/airport.net` | Converted net |
+| `out/airport-pruned.svg`, `out/airport-pruned.net` | Net after removing dead transitions |
+| `out/airport-results.json` | Verification results and removed transitions |
 
 DOT sources are saved alongside the diagrams. Open the SVG files in a browser.
 
@@ -32,13 +32,13 @@ For a standard Petri net, omit `--agentnet`:
 python -m petrinet examples/two_dead.txt --pipeline out/two_dead
 ```
 
-To run individual steps, replace `--pipeline out/example` with:
+To run individual steps, replace `--pipeline out/airport` with:
 
 | Option | Action |
 |---|---|
-| `--raw-render out/example` | Draw only the agent model; requires `--agentnet` |
-| `--render out/example` | Convert and draw, without analysis |
-| `--emit out/example.net` | Export only the Tina net |
+| `--raw-render out/airport` | Draw only the agent model; requires `--agentnet` |
+| `--render out/airport` | Convert and draw, without analysis |
+| `--emit out/airport.net` | Export only the Tina net |
 | No export option | Check only dead transitions, without diagrams |
 
 Use `python -m petrinet --help` for all options. On Linux, use `python3` if needed.
@@ -75,7 +75,8 @@ final: done=3
 Equal non-silent labels synchronize transitions across agents. Paired `*`
 arcs move a variable number of tokens. A `read: (place, transition)` arc
 requires a token without consuming it. Names are global.
-See [shop.txt](examples/agents/shop.txt) for indices and a larger model.
+See [airport.txt](examples/agents/airport.txt) for indexed flights, shared crew,
+and synchronized aircraft and passenger activities.
 
 ## Verification
 
