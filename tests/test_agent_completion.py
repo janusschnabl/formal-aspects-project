@@ -147,10 +147,10 @@ class AgentCompletionTests(unittest.TestCase):
             self.assertEqual(report["agent_completion"], {
                 "Customer": {"can_complete": True, "option_to_complete": True, "all_traces_complete": True}, "Resource": None,
             })
-            self.assertIn("Agent Customer: can complete from initial marking: yes", stdout)
-            self.assertIn("Agent Customer: option to complete from every reachable marking: yes", stdout)
-            self.assertIn("Agent Customer: all traces reach a local final (initial marking counts): yes", stdout)
-            self.assertIn("Agent Resource: completion not checked: no explicit final declarations.", stdout)
+            self.assertIn("  Customer\n    Can complete from initial marking: yes", stdout)
+            self.assertIn("    Option to complete from every reachable marking: yes", stdout)
+            self.assertIn("    All traces reach a local final: yes", stdout)
+            self.assertIn("  Resource\n    Completion not checked: no explicit final declarations.", stdout)
 
     def test_airport_can_finish_initially_but_every_type_can_lose_completion(self):
         source = Path(__file__).resolve().parent.parent / "examples" / "agents" / "airport.txt"

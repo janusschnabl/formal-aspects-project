@@ -17,6 +17,38 @@ from petrinet.dot import GraphvizError, render_svg, to_agent_dot, to_dot
 from tests.test_conversion import EXAMPLES, INDEXED, PAIRS
 
 
+EXAMPLE_PIPELINE_OUTPUT = """Global verification
+-------------------
+  Dead converted transitions: 0
+  Reachable deadlock: yes
+  Reachable non-final deadlock: no
+  Option to complete from every reachable marking: yes
+  All traces eventually reach a final marking: yes
+
+Agent verification
+------------------
+  The initial marking may already satisfy an agent type's local final condition.
+  Janus
+    Can complete from initial marking: yes
+    Option to complete from every reachable marking: yes
+    All traces reach a local final: yes
+    Reachable deadlock: no
+
+  Thomas
+    Can complete from initial marking: yes
+    Option to complete from every reachable marking: yes
+    All traces reach a local final: yes
+    Reachable deadlock: no
+
+Soundness
+---------
+  Soundness: yes
+  [PASS] Global option to complete
+  [PASS] No per-type deadlocks
+  [PASS] No dead source activities
+"""
+
+
 def run_cli(args):
     stdout, stderr = StringIO(), StringIO()
     with redirect_stdout(stdout), redirect_stderr(stderr):
@@ -110,18 +142,7 @@ class CliTests(unittest.TestCase):
             check.side_effect = verify_original_before_check
             self.assertEqual(run_cli([os.path.join(EXAMPLES, "example.txt"), "--agentnet",
                                       "--pipeline", str(prefix), "--timeout", "10"]),
-                             (0, "No dead transitions.\n"
-                              "Reachable deadlock: yes\nReachable non-final deadlock: no\n"
-                              "Option to complete from every reachable marking: yes\n"
-                              "All traces eventually reach a final marking: yes\n"
-                              "Agent Janus: can complete from initial marking: yes\n"
-                              "Agent Janus: option to complete from every reachable marking: yes\n"
-                              "Agent Janus: all traces reach a local final (initial marking counts): yes\n"
-                              "Agent Thomas: can complete from initial marking: yes\n"
-                              "Agent Thomas: option to complete from every reachable marking: yes\n"
-                              "Agent Thomas: all traces reach a local final (initial marking counts): yes\n"
-                              "Agent Janus: reachable deadlock: no\nAgent Thomas: reachable deadlock: no\n"
-                              "Soundness: yes\nNo dead source activities.\n", ""))
+                             (0, EXAMPLE_PIPELINE_OUTPUT, ""))
             load.assert_called_once()
             convert.assert_called_once()
             check.assert_called_once()
@@ -375,26 +396,16 @@ class RealGraphvizTests(unittest.TestCase):
             prefix = Path(tmp) / "output folder" / "example"
             self.assertEqual(run_cli([os.path.join(EXAMPLES, "example.txt"), "--agentnet",
                                       "--pipeline", str(prefix), "--timeout", "15"]),
-                             (0, "No dead transitions.\n"
-                              "Reachable deadlock: yes\nReachable non-final deadlock: no\n"
-                              "Option to complete from every reachable marking: yes\n"
-                              "All traces eventually reach a final marking: yes\n"
-                              "Agent Janus: can complete from initial marking: yes\n"
-                              "Agent Janus: option to complete from every reachable marking: yes\n"
-                              "Agent Janus: all traces reach a local final (initial marking counts): yes\n"
-                              "Agent Thomas: can complete from initial marking: yes\n"
-                              "Agent Thomas: option to complete from every reachable marking: yes\n"
-                              "Agent Thomas: all traces reach a local final (initial marking counts): yes\n"
-                              "Agent Janus: reachable deadlock: no\nAgent Thomas: reachable deadlock: no\n"
-                              "Soundness: yes\nNo dead source activities.\n", ""))
+                             (0, EXAMPLE_PIPELINE_OUTPUT, ""))
             for suffix in [".svg", "-agent.svg"]:
                 self.assertEqual(ElementTree.parse(f"{prefix}{suffix}").getroot().tag,
                                  "{http://www.w3.org/2000/svg}svg")
             standard = os.path.join(os.path.dirname(__file__), "nets", "two_dead.txt")
             self.assertEqual(run_cli([standard, "--pipeline", str(Path(tmp) / "two_dead")]),
-                             (0, "Dead transitions:\n  t3\n  t4\n"
-                              "Reachable deadlock: no\nReachable non-final deadlock: no\n"
-                              "Completion not checked: no final declarations.\n", ""))
+                             (0, "Global verification\n-------------------\n"
+                              "  Dead transitions: 2\n    t3\n    t4\n"
+                              "  Reachable deadlock: no\n  Reachable non-final deadlock: no\n"
+                              "  Completion not checked: no final declarations.\n", ""))
             report = json.loads((Path(tmp) / "two_dead-results.json").read_text())
             self.assertEqual(report["removed_transitions"], ["t3", "t4"])
             self.assertEqual(report["before"]["transitions"], 4)

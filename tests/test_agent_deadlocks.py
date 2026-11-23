@@ -119,8 +119,10 @@ class AgentDeadlockTests(unittest.TestCase):
             self.assertEqual(report["status"], "complete")
             self.assertEqual(report["agent_deadlocks"], {"Customer": True, "Clerk": False})
             self.assertEqual(report["removed_transitions"], ["serve__k_Customer_1", "serve__k_Customer_2"])
-            self.assertIn("Agent Customer: reachable deadlock: yes", stdout)
-            self.assertIn("Agent Clerk: reachable deadlock: no", stdout)
+            customer = stdout.split("  Customer\n", 1)[1].split("\n\n", 1)[0]
+            clerk = stdout.split("  Clerk\n", 1)[1].split("\n\n", 1)[0]
+            self.assertIn("    Reachable deadlock: yes", customer)
+            self.assertIn("    Reachable deadlock: no", clerk)
             self.assertNotIn("serve__k_Customer_", Path(f"{prefix}-pruned.net").read_text())
 
 

@@ -66,8 +66,10 @@ custom properties share one property graph and Muse session. The helper
 `_can_act_expression` builds the event predicates, and `_final_expression`
 builds the local-final predicates.
 
-The terminal prints `Agent Customer: reachable deadlock: yes/no`. JSON stores
-booleans under `agent_deadlocks`, for example:
+The terminal groups each type's `Reachable deadlock: yes/no` with its local
+completion results under `Agent verification`. The `Soundness` section marks
+the no-deadlocks requirement as PASS/FAIL and names every deadlocked type.
+JSON stores booleans under `agent_deadlocks`, for example:
 
 ```json
 "agent_deadlocks": {"Customer": true, "Clerk": false}

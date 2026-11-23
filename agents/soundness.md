@@ -90,9 +90,33 @@ reachable per-type deadlocks.
 
 ## Reports
 
-The terminal prints `Soundness: yes/no` and lists any dead source activities,
-or explicitly says `No dead source activities.`. This is separate from its
-`Dead converted transitions` list.
+The terminal separates `Global verification`, `Agent verification`, optional
+`CTL properties`, and `Soundness`. Each type's completion and deadlock results
+stay together in the agent section.
+
+The soundness section prints the combined `Soundness: yes/no` and marks all
+three requirements as PASS/FAIL. A failed completion check explains that a
+reachable marking cannot reach a global final. Deadlock failures name every
+affected type; activity failures list each dead source activity and its local
+members. All failures are reported, even when more than one condition fails.
+The `Dead converted transitions` list remains in the global section and is
+not itself a soundness failure.
+
+For the airport model:
+
+```text
+Soundness
+---------
+  Soundness: no
+  [FAIL] Global option to complete
+    A reachable marking has no path to a global final.
+  [FAIL] No per-type deadlocks
+    Deadlocked type: Aircraft
+    Deadlocked type: Crew
+    Deadlocked type: Passenger
+  [PASS] No dead source activities
+```
+
 JSON contains `soundness` and `dead_activities`; each dead activity records its
 name, label, and participating local transitions. For example:
 
@@ -113,8 +137,9 @@ name, label, and participating local transitions. For example:
 ```
 
 Without global final declarations, soundness is unspecified (`null`), while
-dead source activities are still reported. Standard-net inputs have no agent
-metadata and do not receive this agent-soundness verdict.
+the terminal marks global completion as SKIP and still reports the known
+per-type deadlocks and dead source activities. Standard-net inputs have no
+agent metadata and do not receive this agent-soundness verdict.
 
 An unsound model still has a completed verification result and exit code 0.
 Checker failures keep soundness unset and use exit code 2. No successful

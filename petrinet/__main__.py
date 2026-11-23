@@ -14,6 +14,87 @@ from .net import PetriNet, PetriNetError
 from .parser import ParseError, load
 
 
+def _print_pipeline_report(report, *, agent_model: bool):
+    """Group completed results and explain each failed soundness requirement."""
+    def section(title):
+        print(title)
+        print("-" * len(title))
+
+    def check(label, holds, indent="  "):
+        print(f"{indent}{label}: " + ("yes" if holds else "no"))
+
+    section("Global verification")
+    dead = report["dead_transitions"]
+    label = "Dead converted transitions" if agent_model else "Dead transitions"
+    print(f"  {label}: {len(dead)}")
+    for name in dead:
+        print(f"    {name}")
+    deadlocks = report["deadlocks"]
+    check("Reachable deadlock", deadlocks["reachable"])
+    check("Reachable non-final deadlock", deadlocks["non_final_reachable"])
+    completion = report["completion"]
+    if completion is None:
+        print("  Completion not checked: no final declarations.")
+    else:
+        check("Option to complete from every reachable marking", completion["option_to_complete"])
+        check("All traces eventually reach a final marking", completion["all_traces_complete"])
+
+    if agent_model:
+        print()
+        section("Agent verification")
+        print("  The initial marking may already satisfy an agent type's local final condition.")
+        local_completion = report["agent_completion"] or {}
+        local_deadlocks = report["agent_deadlocks"] or {}
+        names = sorted(local_completion.keys() | local_deadlocks.keys())
+        if not names:
+            print("  No agent types.")
+        for index, name in enumerate(names):
+            if index:
+                print()
+            print(f"  {name}")
+            local = local_completion.get(name)
+            if local is None:
+                print("    Completion not checked: no explicit final declarations.")
+            else:
+                check("Can complete from initial marking", local["can_complete"], "    ")
+                check("Option to complete from every reachable marking", local["option_to_complete"], "    ")
+                check("All traces reach a local final", local["all_traces_complete"], "    ")
+            if name in local_deadlocks:
+                check("Reachable deadlock", local_deadlocks[name], "    ")
+
+    if report["properties"]:
+        print()
+        section("CTL properties")
+        for name, holds in report["properties"].items():
+            check(name, holds)
+
+    if agent_model:
+        print()
+        section("Soundness")
+        if report["soundness"] is None:
+            print("  Soundness not checked: no global final declarations.")
+        else:
+            check("Soundness", report["soundness"])
+
+        def requirement(label, holds):
+            print(f"  [{'PASS' if holds else 'FAIL'}] {label}")
+
+        if completion is None:
+            print("  [SKIP] Global option to complete: no global final declarations.")
+        else:
+            requirement("Global option to complete", completion["option_to_complete"])
+            if not completion["option_to_complete"]:
+                print("    A reachable marking has no path to a global final.")
+        blocked = sorted(name for name, reachable in local_deadlocks.items() if reachable)
+        requirement("No per-type deadlocks", not blocked)
+        for name in blocked:
+            print(f"    Deadlocked type: {name}")
+        requirement("No dead source activities", not report["dead_activities"])
+        for activity in report["dead_activities"]:
+            members = ", ".join(f"{m['agent']}.{m['transition']}" for m in activity["members"])
+            print(f"    Dead source activity: {activity['name']} ({members})")
+
+
 def _prune_pipeline(net: PetriNet, args, labels, conversion: agentnet.ConversionResult | None = None,
                     place_groups=None):
     """Analyze after the original exports exist, then save the pruned net."""
@@ -187,45 +268,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 2
 
-    if dead:
+    if args.pipeline is not None:
+        _print_pipeline_report(verification, agent_model=args.agentnet)
+    elif dead:
         print("Dead converted transitions:" if args.agentnet else "Dead transitions:")
         for t in dead:
             print(f"  {t.name}")
     else:
         print("No dead transitions.")
-    if args.pipeline is not None:
-        deadlocks = verification["deadlocks"]
-        print("Reachable deadlock: " + ("yes" if deadlocks["reachable"] else "no"))
-        print("Reachable non-final deadlock: " + ("yes" if deadlocks["non_final_reachable"] else "no"))
-        completion = verification["completion"]
-        if completion is None:
-            print("Completion not checked: no final declarations.")
-        else:
-            print("Option to complete from every reachable marking: " + ("yes" if completion["option_to_complete"] else "no"))
-            print("All traces eventually reach a final marking: " + ("yes" if completion["all_traces_complete"] else "no"))
-        for name, local in (verification["agent_completion"] or {}).items():
-            if local is None:
-                print(f"Agent {name}: completion not checked: no explicit final declarations.")
-            else:
-                print(f"Agent {name}: can complete from initial marking: " + ("yes" if local["can_complete"] else "no"))
-                print(f"Agent {name}: option to complete from every reachable marking: " + ("yes" if local["option_to_complete"] else "no"))
-                print(f"Agent {name}: all traces reach a local final (initial marking counts): " + ("yes" if local["all_traces_complete"] else "no"))
-        for name, reachable in (verification["agent_deadlocks"] or {}).items():
-            print(f"Agent {name}: reachable deadlock: " + ("yes" if reachable else "no"))
-        if args.agentnet:
-            if verification["soundness"] is None:
-                print("Soundness not checked: no global final declarations.")
-            else:
-                print("Soundness: " + ("yes" if verification["soundness"] else "no"))
-            if verification["dead_activities"]:
-                print("Dead source activities:")
-                for activity in verification["dead_activities"]:
-                    members = ", ".join(f"{m['agent']}.{m['transition']}" for m in activity["members"])
-                    print(f"  {activity['name']} ({members})")
-            else:
-                print("No dead source activities.")
-        for name, holds in verification["properties"].items():
-            print(f"CTL {name}: " + ("yes" if holds else "no"))
     return 0
 
 

@@ -319,8 +319,9 @@ class RealPipelineAuditTests(unittest.TestCase):
                 self.assertEqual(report["status"], "complete")
                 self.assertEqual(report["removed_transitions"], expected_dead)
                 self.assertEqual(report["dead_transitions"], expected_dead)
-                expected_stdout = ("Dead converted transitions:\n" + "".join(f"  {t}\n" for t in expected_dead)
-                                   if expected_dead else "No dead transitions.\n")
+                expected_stdout = ("Global verification\n-------------------\n"
+                                   + f"  Dead converted transitions: {len(expected_dead)}\n"
+                                   + "".join(f"    {t}\n" for t in expected_dead))
                 self.assertTrue(proc.stdout.startswith(expected_stdout), proc.stdout)
                 for section, verdicts in expected.items():
                     self.assertEqual(report[section], verdicts, (name, section))
@@ -340,15 +341,23 @@ class RealPipelineAuditTests(unittest.TestCase):
                 self.assertIn("Soundness not checked: no global final declarations." if soundness is None
                               else "Soundness: " + ("yes" if soundness else "no"), proc.stdout)
                 for agent_name, local in expected["agent_completion"].items():
+                    agent_output = proc.stdout.split(f"  {agent_name}\n", 1)[1].split("\n\n", 1)[0]
                     if local is None:
-                        self.assertIn(f"Agent {agent_name}: completion not checked: no explicit final declarations.", proc.stdout)
+                        self.assertIn("    Completion not checked: no explicit final declarations.", agent_output)
                     else:
-                        for key, label in [("can_complete", "can complete from initial marking"),
-                                           ("option_to_complete", "option to complete from every reachable marking"),
-                                           ("all_traces_complete", "all traces reach a local final (initial marking counts)")]:
-                            self.assertIn(f"Agent {agent_name}: {label}: " + ("yes" if local[key] else "no"), proc.stdout)
+                        for key, label in [("can_complete", "Can complete from initial marking"),
+                                           ("option_to_complete", "Option to complete from every reachable marking"),
+                                           ("all_traces_complete", "All traces reach a local final")]:
+                            self.assertIn(f"    {label}: " + ("yes" if local[key] else "no"), agent_output)
                 for agent_name, reachable in expected["agent_deadlocks"].items():
-                    self.assertIn(f"Agent {agent_name}: reachable deadlock: " + ("yes" if reachable else "no"), proc.stdout)
+                    agent_output = proc.stdout.split(f"  {agent_name}\n", 1)[1].split("\n\n", 1)[0]
+                    self.assertIn("    Reachable deadlock: " + ("yes" if reachable else "no"), agent_output)
+                    self.assertEqual(f"    Deadlocked type: {agent_name}\n" in proc.stdout, reachable)
+                self.assertIn("  [FAIL] No dead source activities" if dead_activities else
+                              "  [PASS] No dead source activities", proc.stdout)
+                for activity in dead_activities:
+                    members = ", ".join(f"{a}.{t}" for a, t in sorted(activity.members))
+                    self.assertIn(f"    Dead source activity: {activity.name} ({members})", proc.stdout)
                 for key, label in [("reachable", "Reachable deadlock"),
                                    ("non_final_reachable", "Reachable non-final deadlock")]:
                     self.assertIn(f"{label}: " + ("yes" if expected["deadlocks"][key] else "no"), proc.stdout)

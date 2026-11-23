@@ -101,6 +101,12 @@ a silent transition and a labelled group can share a name. Standard nets have
 no source-agent metadata, so both report fields are `null`.
 The CLI labels generated dead transitions as `Dead converted transitions` and
 reports source-activity coverage separately, including when none are dead.
+`_print_pipeline_report` groups global checks, per-type completion and deadlocks,
+optional CTL properties, and soundness under separate headings. Soundness shows
+each requirement as PASS/FAIL (SKIP for missing global finals), lists every
+deadlocked type, and identifies dead activities by name and local members.
+These explanations use the existing results; the JSON schema and verdict
+aggregation are unchanged.
 
 `.net` files contain Tina structure only. Finals and CTL declarations remain
 Python metadata and appear in diagrams/reports as appropriate. The Python CLI

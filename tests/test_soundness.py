@@ -46,8 +46,8 @@ class SoundnessTests(unittest.TestCase):
         self.assertEqual(report["dead_transitions"], ["move__k_A_3"])
         self.assertEqual(report["dead_activities"], [])
         self.assertIs(report["soundness"], True)
-        self.assertIn("Dead converted transitions:\n  move__k_A_3", stdout)
-        self.assertIn("No dead source activities.", stdout)
+        self.assertIn("  Dead converted transitions: 1\n    move__k_A_3", stdout)
+        self.assertIn("  [PASS] No dead source activities", stdout)
         self.assertIn("Soundness: yes", stdout)
         self.assertIn("move__k_A_1", pruned)
         self.assertNotIn("move__k_A_3", pruned)
@@ -63,7 +63,9 @@ class SoundnessTests(unittest.TestCase):
         self.assertIs(report["soundness"], False)
         self.assertEqual(report["removed_transitions"], ["dead__k_A_1"])
         self.assertNotIn("dead__k_A_1", pruned)
-        self.assertIn("Dead source activities:\n  dead (A.dead)", stdout)
+        self.assertIn("  [FAIL] No dead source activities\n    Dead source activity: dead (A.dead)", stdout)
+        self.assertIn("  [PASS] Global option to complete", stdout)
+        self.assertIn("  [PASS] No per-type deadlocks", stdout)
 
     def test_activity_with_zero_generated_variants_is_not_lost(self):
         text = "agent: A\nplaces: p q\ntransitions: move\narcs: (p,move,*) (move,q,*)\nfinal: p=0\n"
@@ -133,13 +135,33 @@ class SoundnessTests(unittest.TestCase):
         self.assertIs(report["soundness"], False)
 
     def test_agent_deadlocks_fail_soundness_even_when_global_completion_is_possible(self):
-        report, _, _ = self.pipeline(
+        report, stdout, _ = self.pipeline(
             "agent: A\nplaces: ready done\ntransitions: finish\narcs: (ready,finish) (finish,done)\n"
             "agent: Resource\nplaces: idle\ninitial: ready=1 idle=1\nunrestricted final: done=1\n")
         self.assertTrue(report["completion"]["option_to_complete"])
         self.assertEqual(report["dead_activities"], [])
         self.assertEqual(report["agent_deadlocks"], {"A": False, "Resource": True})
         self.assertIs(report["soundness"], False)
+        self.assertIn("  [PASS] Global option to complete", stdout)
+        self.assertIn("  [FAIL] No per-type deadlocks\n    Deadlocked type: Resource", stdout)
+        self.assertNotIn("Deadlocked type: A\n", stdout)
+        self.assertIn("  [PASS] No dead source activities", stdout)
+
+    def test_soundness_lists_all_failed_requirements_and_affected_types_and_activities(self):
+        report, stdout, _ = self.pipeline(
+            "agent: A\nplaces: ready done stuck unused\ntransitions: finish fail dead\n"
+            "arcs: (ready,finish) (finish,done) (ready,fail) (fail,stuck) (unused,dead) (dead,unused)\n"
+            "agent: Resource\nplaces: idle\ninitial: ready=1 idle=1\nunrestricted final: done=1\n")
+        self.assertIs(report["soundness"], False)
+        soundness = stdout.split("\nSoundness\n---------\n", 1)[1]
+        self.assertEqual(soundness, "  Soundness: no\n"
+                         "  [FAIL] Global option to complete\n"
+                         "    A reachable marking has no path to a global final.\n"
+                         "  [FAIL] No per-type deadlocks\n"
+                         "    Deadlocked type: A\n"
+                         "    Deadlocked type: Resource\n"
+                         "  [FAIL] No dead source activities\n"
+                         "    Dead source activity: dead (A.dead)\n")
 
     def test_local_completion_options_do_not_replace_the_global_final(self):
         report, _, _ = self.pipeline(
@@ -160,12 +182,16 @@ class SoundnessTests(unittest.TestCase):
         self.assertIsNone(report["soundness"])
         self.assertEqual(report["dead_activities"], [activity("dead", None, ("A", "dead"))])
         self.assertIn("Soundness not checked: no global final declarations.", stdout)
+        self.assertIn("  [SKIP] Global option to complete: no global final declarations.", stdout)
+        self.assertIn("  [FAIL] No dead source activities\n    Dead source activity: dead (A.dead)", stdout)
 
     def test_plain_nets_do_not_claim_agent_soundness(self):
         report, stdout, _ = self.pipeline("places: p\nfinal:\n", agent_model=False)
         self.assertIsNone(report["soundness"])
         self.assertIsNone(report["dead_activities"])
         self.assertNotIn("Soundness:", stdout)
+        self.assertNotIn("\nSoundness\n", stdout)
+        self.assertNotIn("Agent verification", stdout)
 
     def test_failed_rerun_clears_the_previous_soundness_verdict(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch("petrinet.__main__.render_svg", return_value="<svg/>"):

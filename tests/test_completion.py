@@ -119,8 +119,7 @@ class CompletionTests(unittest.TestCase):
             self.assertEqual(report["completion"], {"option_to_complete": True, "all_traces_complete": False})
             self.assertEqual(report["deadlocks"], {"reachable": True, "non_final_reachable": False})
             self.assertEqual(report["properties"], {"can_finish": True, "must_finish": False})
-            self.assertIn("CTL can_finish: yes", stdout)
-            self.assertIn("CTL must_finish: no", stdout)
+            self.assertIn("\nCTL properties\n--------------\n  can_finish: yes\n  must_finish: no\n", stdout)
 
     def test_named_ctl_operators_and_place_comparisons(self):
         net = parse("places: waiting done\ntransitions: board loop\ninitial: waiting=1\n"
