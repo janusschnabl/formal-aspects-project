@@ -14,7 +14,7 @@ from .net import PetriNet, PetriNetError
 from .parser import ParseError, load
 
 
-def _prune_pipeline(net: PetriNet, args, labels, agent_final_clauses=None, agent_transitions=None,
+def _prune_pipeline(net: PetriNet, args, labels, conversion: agentnet.ConversionResult | None = None,
                     place_groups=None):
     """Analyze after the original exports exist, then save the pruned net."""
     report_path = Path(f"{args.pipeline}-results.json")
@@ -22,6 +22,7 @@ def _prune_pipeline(net: PetriNet, args, labels, agent_final_clauses=None, agent
         "status": "checking", "input": args.net,
         "before": {"places": len(net.places), "transitions": len(net.transitions), "arcs": len(net.arcs)},
         "dead_transitions": None, "removed_transitions": None,
+        "dead_activities": None, "soundness": None,
         "completion": None,
         "agent_completion": None,
         "agent_deadlocks": None,
@@ -36,10 +37,22 @@ def _prune_pipeline(net: PetriNet, args, labels, agent_final_clauses=None, agent
     try:
         dead = tina.dead_transitions(net, args.tina, args.timeout)
         report["dead_transitions"] = [t.name for t in sorted(dead)]
+        if conversion is not None:
+            report["dead_activities"] = [
+                {"name": activity.name, "label": activity.label,
+                 "members": [{"agent": a, "transition": t} for a, t in sorted(activity.members)]}
+                for activity in conversion.dead_activities(dead)
+            ]
         verification = tina.verify_properties(net, args.tina, args.timeout,
-                                              agent_final_clauses=agent_final_clauses,
-                                              agent_transitions=agent_transitions)
+                                              agent_final_clauses=None if conversion is None else conversion.agent_final_clauses,
+                                              agent_transitions=None if conversion is None else conversion.agent_transitions)
         report.update(verification)
+        if conversion is not None and verification["completion"] is not None:
+            report["soundness"] = (
+                verification["completion"]["option_to_complete"]
+                and not any(verification["agent_deadlocks"].values())
+                and not report["dead_activities"]
+            )
         pruned = net.without_transitions(dead)
         report["after"] = {"places": len(pruned.places), "transitions": len(pruned.transitions), "arcs": len(pruned.arcs)}
         pruned_dot = to_dot(pruned, transition_labels=labels, place_groups=place_groups)
@@ -71,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--emit", "--emit-tina", dest="emit", metavar="FILE", help="write the Tina .net translation to FILE ('-' for stdout) and exit")
     ap.add_argument("--dot", metavar="FILE", help="write the standard net as Graphviz DOT and exit ('-' for stdout)")
     ap.add_argument("--raw-dot", metavar="FILE", help="write raw agent nets as DOT; requires --agentnet")
-    ap.add_argument("--pipeline", metavar="PREFIX", help="draw original nets, check dead transitions, deadlocks and CTL properties, then report removals and draw the pruned net")
+    ap.add_argument("--pipeline", metavar="PREFIX", help="draw original nets, check dead transitions, deadlocks, agent soundness and CTL properties, then draw the pruned net")
     ap.add_argument("--raw-render", metavar="PREFIX", help="parse and draw only the agent model as DOT and SVG; requires --agentnet")
     ap.add_argument("--render", metavar="PREFIX", help="export Tina .net, DOT, and SVG files using PREFIX; also raw-agent diagrams with --agentnet")
     ap.add_argument("--graphviz", default="dot", metavar="PATH", help="Graphviz dot executable for --render (default: dot)")
@@ -153,10 +166,7 @@ def main(argv: list[str] | None = None) -> int:
 
         pipeline_check_started = args.pipeline is not None
         if args.pipeline is not None:
-            dead, verification = _prune_pipeline(
-                net, args, labels, None if result is None else result.agent_final_clauses,
-                None if result is None else result.agent_transitions, groups,
-            )
+            dead, verification = _prune_pipeline(net, args, labels, result, groups)
         else:
             dead = tina.dead_transitions(net, args.tina, args.timeout)
     except (OSError, ParseError, agentnet.ParseError, agentnet.ConversionError, PetriNetError,
@@ -170,6 +180,7 @@ def main(argv: list[str] | None = None) -> int:
                     report_path.write_text(json.dumps({
                         "status": "failed", "input": args.net, "error": str(e),
                         "dead_transitions": None, "removed_transitions": None,
+                        "dead_activities": None, "soundness": None,
                     }, indent=2) + "\n", encoding="utf-8")
                 except OSError:
                     pass  # Preserve the original error if the report is unwritable.
@@ -200,6 +211,16 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Agent {name}: always completes: " + ("yes" if local["all_traces_complete"] else "no"))
         for name, reachable in (verification["agent_deadlocks"] or {}).items():
             print(f"Agent {name}: reachable deadlock: " + ("yes" if reachable else "no"))
+        if args.agentnet:
+            if verification["soundness"] is None:
+                print("Soundness not checked: no global final declarations.")
+            else:
+                print("Soundness: " + ("yes" if verification["soundness"] else "no"))
+            if verification["dead_activities"]:
+                print("Dead source activities:")
+                for activity in verification["dead_activities"]:
+                    members = ", ".join(f"{m['agent']}.{m['transition']}" for m in activity["members"])
+                    print(f"  {activity['name']} ({members})")
         for name, holds in verification["properties"].items():
             print(f"CTL {name}: " + ("yes" if holds else "no"))
     return 0

@@ -86,6 +86,8 @@ The pipeline reports:
   A deadlock is a marking with no enabled transition.
 - **Completion:** whether a final remains reachable from every reachable marking,
   and whether every execution eventually reaches a final.
+- **Agent soundness:** combines the option to complete, no per-type deadlocks,
+  and no dead source activities. See the [definition](agents/soundness.md).
 
 With `--agentnet`, completion is also reported per type: **can eventually
 complete** and **always completes**. Local finals use explicit entries for

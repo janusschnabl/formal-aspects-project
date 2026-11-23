@@ -116,7 +116,8 @@ class CliTests(unittest.TestCase):
                               "All traces eventually reach a final marking: yes\n"
                               "Agent Janus: can eventually complete: yes\nAgent Janus: always completes: yes\n"
                               "Agent Thomas: can eventually complete: yes\nAgent Thomas: always completes: yes\n"
-                              "Agent Janus: reachable deadlock: no\nAgent Thomas: reachable deadlock: no\n", ""))
+                              "Agent Janus: reachable deadlock: no\nAgent Thomas: reachable deadlock: no\n"
+                              "Soundness: yes\n", ""))
             load.assert_called_once()
             convert.assert_called_once()
             check.assert_called_once()
@@ -130,12 +131,17 @@ class CliTests(unittest.TestCase):
                 })
             from petrinet.tina import to_tina
             self.assertEqual(Path(f"{prefix}.net").read_text(encoding="utf-8"), to_tina(check.call_args.args[0]))
+            # Without removals, pruning must retain agent colors and labels.
+            self.assertEqual(Path(f"{prefix}-pruned.dot").read_text(encoding="utf-8"),
+                             Path(f"{prefix}.dot").read_text(encoding="utf-8"))
             self.assertEqual(check.call_args.args[1:], (None, 10))
             self.assertEqual(len(list(prefix.parent.iterdir())), 9)
             report = json.loads(Path(f"{prefix}-results.json").read_text())
             self.assertEqual(report["status"], "complete")
             self.assertEqual(report["removed_transitions"], [])
             self.assertEqual(report["before"], report["after"])
+            self.assertTrue(report["soundness"])
+            self.assertEqual(report["dead_activities"], [])
             for section, verdicts in verification.return_value.items():
                 self.assertEqual(report[section], verdicts)
 
@@ -147,6 +153,7 @@ class CliTests(unittest.TestCase):
                 mock.patch("petrinet.__main__.tina.verify_properties", return_value={
                     "completion": {"option_to_complete": True, "all_traces_complete": True},
                     "deadlocks": {"reachable": True, "non_final_reachable": False}, "properties": {},
+                    "agent_completion": {}, "agent_deadlocks": {},
                 }):
             prefix = Path(tmp) / "example"
             args = [os.path.join(EXAMPLES, "example.txt"), "--agentnet", "--pipeline", str(prefix)]
@@ -171,6 +178,8 @@ class CliTests(unittest.TestCase):
             report = json.loads(Path(f"{prefix}-results.json").read_text())
             self.assertEqual(report["status"], "failed")
             self.assertIsNone(report["removed_transitions"])
+            self.assertIsNone(report["soundness"])
+            self.assertIsNone(report["dead_activities"])
 
     def test_pruned_render_failure_leaves_original_and_records_failure(self):
         with tempfile.TemporaryDirectory() as tmp, \
@@ -368,7 +377,8 @@ class RealGraphvizTests(unittest.TestCase):
                               "All traces eventually reach a final marking: yes\n"
                               "Agent Janus: can eventually complete: yes\nAgent Janus: always completes: yes\n"
                               "Agent Thomas: can eventually complete: yes\nAgent Thomas: always completes: yes\n"
-                              "Agent Janus: reachable deadlock: no\nAgent Thomas: reachable deadlock: no\n", ""))
+                              "Agent Janus: reachable deadlock: no\nAgent Thomas: reachable deadlock: no\n"
+                              "Soundness: yes\n", ""))
             for suffix in [".svg", "-agent.svg"]:
                 self.assertEqual(ElementTree.parse(f"{prefix}{suffix}").getroot().tag,
                                  "{http://www.w3.org/2000/svg}svg")

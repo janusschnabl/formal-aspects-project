@@ -7,6 +7,7 @@ No reachability analysis or pruning is performed.
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 from itertools import product
 import re
@@ -41,6 +42,7 @@ class ConversionResult:
     place_map: dict[str, Place]
     transition_origins: dict[Transition, TransitionOrigin]
     agent_final_clauses: dict[str, tuple[dict[Place, int], ...]]
+    source_activities: tuple[GlobalTransition, ...]
 
     @property
     def agent_transitions(self) -> dict[str, frozenset[Transition]]:
@@ -50,6 +52,13 @@ class ConversionResult:
             for name, _ in origin.global_transition.members:
                 participating[name].add(transition)
         return {name: frozenset(transitions) for name, transitions in participating.items()}
+
+    def dead_activities(self, dead_transitions: Iterable[Transition]) -> tuple[GlobalTransition, ...]:
+        """Original activities with no live variant, including zero-variant activities."""
+        dead = set(dead_transitions)
+        live = {origin.global_transition for transition, origin in self.transition_origins.items()
+                if transition not in dead}
+        return tuple(activity for activity in self.source_activities if activity not in live)
 
 
 def _name(name: str) -> None:
@@ -183,4 +192,4 @@ def convert(source: MultiAgentNet) -> ConversionResult:
         unrestricted_final_markings=[{place_map[p]: n for p, n in m.items()} for m in source.unrestricted_finals],
         ctl_properties=source.ctl_properties,
     )
-    return ConversionResult(net, place_map, origins, agent_final_clauses)
+    return ConversionResult(net, place_map, origins, agent_final_clauses, tuple(globals_))

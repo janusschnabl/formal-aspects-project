@@ -323,6 +323,21 @@ class RealPipelineAuditTests(unittest.TestCase):
                 self.assertTrue(proc.stdout.startswith(expected_stdout), proc.stdout)
                 for section, verdicts in expected.items():
                     self.assertEqual(report[section], verdicts, (name, section))
+                fired_members = {members for members, _ in fired}
+                dead_activities = [g for g in source.global_transitions()
+                                   if tuple(sorted(g.members)) not in fired_members]
+                self.assertCountEqual(report["dead_activities"], [
+                    {"name": g.name, "label": g.label,
+                     "members": [{"agent": a, "transition": t} for a, t in sorted(g.members)]}
+                    for g in dead_activities
+                ])
+                soundness = None if expected["completion"] is None else (
+                    expected["completion"]["option_to_complete"]
+                    and not any(expected["agent_deadlocks"].values()) and not dead_activities
+                )
+                self.assertIs(report["soundness"], soundness)
+                self.assertIn("Soundness not checked: no global final declarations." if soundness is None
+                              else "Soundness: " + ("yes" if soundness else "no"), proc.stdout)
                 for agent_name, local in expected["agent_completion"].items():
                     if local is None:
                         self.assertIn(f"Agent {agent_name}: completion not checked: no explicit final declarations.", proc.stdout)

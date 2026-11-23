@@ -53,6 +53,8 @@ implicit zero constraints, generated EF/AF queries, and the code path.
 See [Per-type deadlock checks](deadlocks.md) for participation mapping and the
 `EF ((- LocalFinal) /\ (- EF CanAct))` check. `ConversionResult.agent_transitions`
 derives participation from transition origins, including read-only members.
+See [Agent soundness](soundness.md) for the combined verdict and source-activity
+coverage. These are aggregated in the CLI from existing Tina/Muse results.
 
 Semantics to preserve:
 
@@ -87,6 +89,14 @@ known dead transitions remain recorded but removals and verdicts are unset.
 A false property is a completed check with exit code 0; tool, parse, conversion,
 and incomplete-analysis errors use exit code 2.
 
+Agent pipeline reports also contain `soundness` (boolean, or `null` without
+global finals) and `dead_activities` (source activity records). Original groups
+are retained in `ConversionResult.source_activities`, even if a group generated
+no transitions. `dead_activities(dead)` identifies groups with no live variant.
+Compute this before pruning and use activity identity, not just display names:
+a silent transition and a labelled group can share a name. Standard nets have
+no source-agent metadata, so both report fields are `null`.
+
 `.net` files contain Tina structure only. Finals and CTL declarations remain
 Python metadata and appear in diagrams/reports as appropriate. The Python CLI
 reads the project's text formats, not exported Tina files.
@@ -117,3 +127,7 @@ covered separately. Upstream manuals are under `tools/tina/4.0.0/`.
   synchronization/read-only participation, missing completion exemptions, and
   reporting before pruning. The pipeline audit uses independent backward
   reachability over source-labelled edges to verify per-type deadlock results.
+- `test_soundness.py` checks grouping across dead weight variants, entirely dead
+  and zero-variant activities, colliding activity names, verdict aggregation,
+  and failure recovery. The source-graph pipeline audit independently checks
+  dead activity groups and soundness.
