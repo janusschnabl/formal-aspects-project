@@ -1,0 +1,89 @@
+# Swimming club: one season, two teams.
+# Transition names carry an agent prefix (a_, i_, s_) because names must be unique
+# across all agents; the label (as in the figure) is what synchronises.
+# move_1 moves a swimmer from team 1 to team 2, move_2 from team 2 to team 1.
+ 
+# ---------------------------------------------------------------- Admin
+agent: Admin
+  places: a_plan, a_season, season_end
+  transitions: a_form_teams, a_close_season
+               a_join_team_1, a_join_team_2, a_mail_1, a_mail_2
+               a_move_1, a_move_2, a_end_1, a_end_2
+  labels: a_form_teams=form_teams, a_close_season=close_season
+          a_join_team_1=join_team_1, a_join_team_2=join_team_2
+          a_mail_1=mail_1, a_mail_2=mail_2
+          a_move_1=move_1, a_move_2=move_2
+          a_end_1=end_1, a_end_2=end_2
+  arcs: (a_plan, a_form_teams) (a_form_teams, a_season)
+        (a_season, a_close_season) (a_close_season, season_end)
+  read: (a_season, a_join_team_1) (a_season, a_join_team_2)
+        (a_season, a_mail_1) (a_season, a_mail_2)
+        (a_season, a_move_1) (a_season, a_move_2)
+        (a_season, a_end_1) (a_season, a_end_2)
+ 
+# ---------------------------------------------------------------- Instructors
+agent: Instructor
+  places: i_available, i_requested
+          i_head_1, i_assist_1, i_done_1
+          i_head_2, i_assist_2, i_done_2
+  transitions: i_request_work, i_form_teams, i_close_season
+               i_train_1, i_join_team_1, i_end_1, i_finish_1
+               i_train_2, i_join_team_2, i_end_2, i_finish_2
+  labels: i_request_work=request_work, i_form_teams=form_teams, i_close_season=close_season
+          i_train_1=train_1, i_join_team_1=join_team_1, i_end_1=end_1, i_finish_1=finish_1
+          i_train_2=train_2, i_join_team_2=join_team_2, i_end_2=end_2, i_finish_2=finish_2
+  arcs: (i_available, i_request_work) (i_request_work, i_requested)
+        (i_requested, i_form_teams, 4)
+        (i_form_teams, i_head_1) (i_form_teams, i_assist_1)
+        (i_form_teams, i_head_2) (i_form_teams, i_assist_2)
+        (i_head_1, i_end_1) (i_assist_1, i_end_1) (i_end_1, i_done_1, 2)
+        (i_head_2, i_end_2) (i_assist_2, i_end_2) (i_end_2, i_done_2, 2)
+        (i_done_1, i_close_season, 2) (i_close_season, i_done_1, 2)
+        (i_done_2, i_close_season, 2) (i_close_season, i_done_2, 2)
+  read: (i_head_1, i_train_1) (i_assist_1, i_train_1)
+        (i_head_2, i_train_2) (i_assist_2, i_train_2)
+        (i_head_1, i_join_team_1) (i_head_2, i_join_team_2)
+        (i_done_1, i_finish_1) (i_done_2, i_finish_2)
+ 
+# ---------------------------------------------------------------- Swimmers
+agent: Swimmer
+  places: s_idle, s_registered, s_team_1, s_team_2, s_done, s_quit
+  transitions: s_sign_up, s_unregister
+               s_join_team_1, s_train_1, s_mail_1, s_move_1, s_finish_1, s_quit_team_1
+               s_join_team_2, s_train_2, s_mail_2, s_move_2, s_finish_2, s_quit_team_2
+  labels: s_sign_up=sign_up, s_unregister=unregister
+          s_join_team_1=join_team_1, s_train_1=train_1, s_mail_1=mail_1
+          s_move_1=move_1, s_finish_1=finish_1, s_quit_team_1=quit_team_1
+          s_join_team_2=join_team_2, s_train_2=train_2, s_mail_2=mail_2
+          s_move_2=move_2, s_finish_2=finish_2, s_quit_team_2=quit_team_2
+  arcs: (s_idle, s_sign_up) (s_sign_up, s_registered)
+        (s_registered, s_unregister) (s_unregister, s_quit)
+        (s_registered, s_join_team_1, *) (s_join_team_1, s_team_1, *)
+        (s_registered, s_join_team_2, *) (s_join_team_2, s_team_2, *)
+        (s_team_1, s_train_1, *) (s_train_1, s_team_1, *)
+        (s_team_2, s_train_2, *) (s_train_2, s_team_2, *)
+        (s_team_1, s_mail_1, *) (s_mail_1, s_team_1, *)
+        (s_team_2, s_mail_2, *) (s_mail_2, s_team_2, *)
+        (s_team_1, s_move_1) (s_move_1, s_team_2)
+        (s_team_2, s_move_2) (s_move_2, s_team_1)
+        (s_team_1, s_finish_1, *) (s_finish_1, s_done, *)
+        (s_team_2, s_finish_2, *) (s_finish_2, s_done, *)
+        (s_team_1, s_quit_team_1) (s_quit_team_1, s_quit)
+        (s_team_2, s_quit_team_2) (s_quit_team_2, s_quit)
+ 
+# ---------------------------------------------------------------- Markings
+initial: a_plan=1, i_available=4, s_idle=3
+ 
+# Season ended, all instructors done, every swimmer in s_idle, s_quit or s_done.
+# One 'final:' per way of splitting the 3 swimmers over those three places.
+final: season_end=1, i_done_1=2, i_done_2=2, s_done=3
+final: season_end=1, i_done_1=2, i_done_2=2, s_quit=1, s_done=2
+final: season_end=1, i_done_1=2, i_done_2=2, s_quit=2, s_done=1
+final: season_end=1, i_done_1=2, i_done_2=2, s_quit=3
+final: season_end=1, i_done_1=2, i_done_2=2, s_idle=1, s_done=2
+final: season_end=1, i_done_1=2, i_done_2=2, s_idle=1, s_quit=1, s_done=1
+final: season_end=1, i_done_1=2, i_done_2=2, s_idle=1, s_quit=2
+final: season_end=1, i_done_1=2, i_done_2=2, s_idle=2, s_done=1
+final: season_end=1, i_done_1=2, i_done_2=2, s_idle=2, s_quit=1
+final: season_end=1, i_done_1=2, i_done_2=2, s_idle=3
+ 
