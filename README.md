@@ -82,6 +82,8 @@ See [shop.txt](examples/agents/shop.txt) for indices and a larger model.
 The pipeline reports:
 
 - **Dead transitions:** transitions that can never fire. These are removed.
+  With `--agentnet`, these are converted variants; a dead weight choice alone
+  does not make its source activity dead or the model unsound.
 - **Deadlocks:** whether any deadlock is reachable, and whether any is non-final.
   A deadlock is a marking with no enabled transition.
 - **Completion:** whether a final remains reachable from every reachable marking,
@@ -89,9 +91,11 @@ The pipeline reports:
 - **Agent soundness:** combines the option to complete, no per-type deadlocks,
   and no dead source activities. See the [definition](agents/soundness.md).
 
-With `--agentnet`, completion is also reported per type: **can eventually
-complete** and **always completes**. Local finals use explicit entries for
-that type; types with no entries are reported as unspecified.
+With `--agentnet`, each type reports whether its **local final** can be reached
+from the initial marking, remains reachable from every reachable marking, and
+is reached on every trace. The initial marking counts as reaching a local
+final. Soundness requires a **global final** to remain reachable. Local finals
+use explicit entries for that type; types with no entries are unspecified.
 See [how local finals become CTL checks](agents/completion.md) for a worked
 example, including the zero checks for omitted places.
 The pipeline also reports [per-type deadlocks](agents/deadlocks.md): unfinished

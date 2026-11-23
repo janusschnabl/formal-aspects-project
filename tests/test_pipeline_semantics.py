@@ -298,6 +298,7 @@ class RealPipelineAuditTests(unittest.TestCase):
                     local_finals = reference_agent_finals(source, agent, states)
                     expected["agent_completion"][agent_name] = None if local_finals is None else {
                         "can_complete": initial in satisfying_states(states, edges, {"final": local_finals}, ("EF", "final")),
+                        "option_to_complete": initial in satisfying_states(states, edges, {"final": local_finals}, ("AG", ("EF", "final"))),
                         "all_traces_complete": initial in satisfying_states(states, edges, {"final": local_finals}, ("AF", "final")),
                     }
                     can_act = {before for before, members, _, _ in source_edges
@@ -318,7 +319,7 @@ class RealPipelineAuditTests(unittest.TestCase):
                 self.assertEqual(report["status"], "complete")
                 self.assertEqual(report["removed_transitions"], expected_dead)
                 self.assertEqual(report["dead_transitions"], expected_dead)
-                expected_stdout = ("Dead transitions:\n" + "".join(f"  {t}\n" for t in expected_dead)
+                expected_stdout = ("Dead converted transitions:\n" + "".join(f"  {t}\n" for t in expected_dead)
                                    if expected_dead else "No dead transitions.\n")
                 self.assertTrue(proc.stdout.startswith(expected_stdout), proc.stdout)
                 for section, verdicts in expected.items():
@@ -342,8 +343,9 @@ class RealPipelineAuditTests(unittest.TestCase):
                     if local is None:
                         self.assertIn(f"Agent {agent_name}: completion not checked: no explicit final declarations.", proc.stdout)
                     else:
-                        for key, label in [("can_complete", "can eventually complete"),
-                                           ("all_traces_complete", "always completes")]:
+                        for key, label in [("can_complete", "can complete from initial marking"),
+                                           ("option_to_complete", "option to complete from every reachable marking"),
+                                           ("all_traces_complete", "all traces reach a local final (initial marking counts)")]:
                             self.assertIn(f"Agent {agent_name}: {label}: " + ("yes" if local[key] else "no"), proc.stdout)
                 for agent_name, reachable in expected["agent_deadlocks"].items():
                     self.assertIn(f"Agent {agent_name}: reachable deadlock: " + ("yes" if reachable else "no"), proc.stdout)

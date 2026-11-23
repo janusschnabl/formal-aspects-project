@@ -46,6 +46,8 @@ class SoundnessTests(unittest.TestCase):
         self.assertEqual(report["dead_transitions"], ["move__k_A_3"])
         self.assertEqual(report["dead_activities"], [])
         self.assertIs(report["soundness"], True)
+        self.assertIn("Dead converted transitions:\n  move__k_A_3", stdout)
+        self.assertIn("No dead source activities.", stdout)
         self.assertIn("Soundness: yes", stdout)
         self.assertIn("move__k_A_1", pruned)
         self.assertNotIn("move__k_A_3", pruned)
@@ -137,6 +139,18 @@ class SoundnessTests(unittest.TestCase):
         self.assertTrue(report["completion"]["option_to_complete"])
         self.assertEqual(report["dead_activities"], [])
         self.assertEqual(report["agent_deadlocks"], {"A": False, "Resource": True})
+        self.assertIs(report["soundness"], False)
+
+    def test_local_completion_options_do_not_replace_the_global_final(self):
+        report, _, _ = self.pipeline(
+            "agent: A\nplaces: a_done a_cancelled\n"
+            "agent: B\nplaces: b_done b_cancelled\n"
+            "initial: a_done=1 b_done=1\n"
+            "final: a_done=1 b_cancelled=1\nfinal: a_cancelled=1 b_done=1\n")
+        self.assertTrue(all(local["option_to_complete"] for local in report["agent_completion"].values()))
+        self.assertFalse(report["completion"]["option_to_complete"])
+        self.assertFalse(any(report["agent_deadlocks"].values()))
+        self.assertEqual(report["dead_activities"], [])
         self.assertIs(report["soundness"], False)
 
     def test_without_global_finals_soundness_is_unspecified_but_dead_activities_are_reported(self):

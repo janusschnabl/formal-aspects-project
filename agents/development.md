@@ -28,7 +28,8 @@ user formulas in one Muse invocation. Both checks require bounded, completed
 analyses. Each stage gets its own timeout; Tina and Muse share the property
 stage's time allowance.
 
-Built-in formulas live in `_COMPLETION_PROPERTIES` and `_DEADLOCK_PROPERTIES`.
+Built-in formulas live in `_COMPLETION_PROPERTIES`, `_AGENT_COMPLETION_PROPERTIES`,
+and `_DEADLOCK_PROPERTIES`.
 `_CTL_PRELUDE` defines the temporal operators and `IsDeadlock`. `_check_groups`
 maps answers back to section and property names. Add default formulas to these
 dictionaries rather than duplicating formulas or indexing answers manually.
@@ -41,7 +42,7 @@ User properties need only a `ctl: name = formula` line.
 | `completion` | `option_to_complete`, `all_traces_complete`; `None` without finals |
 | `deadlocks` | `reachable`, `non_final_reachable` |
 | `properties` | User property names mapped to booleans |
-| `agent_completion` | Per-type `can_complete` and `all_traces_complete`; `None` per type without local finals |
+| `agent_completion` | Per-type `can_complete`, `option_to_complete`, `all_traces_complete`; `None` per type without local finals |
 | `agent_deadlocks` | Per-type boolean: a reachable unfinished state permanently prevents participation |
 
 `check_completion()` and `check_deadlocks()` run only their respective group.
@@ -49,7 +50,7 @@ The default CLI without export flags checks only dead transitions; the full
 verification runs under `--pipeline`.
 
 See [Per-type completion checks](completion.md) for final-clause inference,
-implicit zero constraints, generated EF/AF queries, and the code path.
+implicit zero constraints, generated EF/AG EF/AF queries, and the code path.
 See [Per-type deadlock checks](deadlocks.md) for participation mapping and the
 `EF ((- LocalFinal) /\ (- EF CanAct))` check. `ConversionResult.agent_transitions`
 derives participation from transition origins, including read-only members.
@@ -63,6 +64,8 @@ Semantics to preserve:
   form a union; an empty exact final accepts the zero marking, while an empty
   unrestricted final accepts every marking.
 - Completion checks are `AG EF IsFinal` and `AF IsFinal`, without fairness.
+  Per-type checks also expose `EF LocalFinal`, `AG EF LocalFinal`, and
+  `AF LocalFinal`. Soundness requires the global `AG EF IsFinal` result.
   A final at time zero satisfies `AF`; later firing can still leave the final
   set and make `AG EF` false. Finals do not disable transitions.
 - `IsDeadlock` is `[T]F` on actual graph edges. Final deadlocks are included in
@@ -96,6 +99,8 @@ no transitions. `dead_activities(dead)` identifies groups with no live variant.
 Compute this before pruning and use activity identity, not just display names:
 a silent transition and a labelled group can share a name. Standard nets have
 no source-agent metadata, so both report fields are `null`.
+The CLI labels generated dead transitions as `Dead converted transitions` and
+reports source-activity coverage separately, including when none are dead.
 
 `.net` files contain Tina structure only. Finals and CTL declarations remain
 Python metadata and appear in diagrams/reports as appropriate. The Python CLI
@@ -121,7 +126,8 @@ covered separately. Upstream manuals are under `tools/tina/4.0.0/`.
   through conversion and pruning.
 - `test_agent_completion.py` checks explicit final inference, zero entries,
   missing local finals, alternative finals, synchronization, and global
-  interleaving effects on EF/AF. The pipeline audit independently checks these
+  interleaving effects on EF/AG EF/AF, including the airport's initially final
+  crew losing its completion option. The pipeline audit independently checks these
   verdicts against the source graph.
 - `test_agent_deadlocks.py` checks permanent versus temporary blocking,
   synchronization/read-only participation, missing completion exemptions, and

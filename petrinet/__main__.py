@@ -188,7 +188,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if dead:
-        print("Dead transitions:")
+        print("Dead converted transitions:" if args.agentnet else "Dead transitions:")
         for t in dead:
             print(f"  {t.name}")
     else:
@@ -207,8 +207,9 @@ def main(argv: list[str] | None = None) -> int:
             if local is None:
                 print(f"Agent {name}: completion not checked: no explicit final declarations.")
             else:
-                print(f"Agent {name}: can eventually complete: " + ("yes" if local["can_complete"] else "no"))
-                print(f"Agent {name}: always completes: " + ("yes" if local["all_traces_complete"] else "no"))
+                print(f"Agent {name}: can complete from initial marking: " + ("yes" if local["can_complete"] else "no"))
+                print(f"Agent {name}: option to complete from every reachable marking: " + ("yes" if local["option_to_complete"] else "no"))
+                print(f"Agent {name}: all traces reach a local final (initial marking counts): " + ("yes" if local["all_traces_complete"] else "no"))
         for name, reachable in (verification["agent_deadlocks"] or {}).items():
             print(f"Agent {name}: reachable deadlock: " + ("yes" if reachable else "no"))
         if args.agentnet:
@@ -221,6 +222,8 @@ def main(argv: list[str] | None = None) -> int:
                 for activity in verification["dead_activities"]:
                     members = ", ".join(f"{m['agent']}.{m['transition']}" for m in activity["members"])
                     print(f"  {activity['name']} ({members})")
+            else:
+                print("No dead source activities.")
         for name, holds in verification["properties"].items():
             print(f"CTL {name}: " + ("yes" if holds else "no"))
     return 0

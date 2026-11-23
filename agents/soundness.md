@@ -2,14 +2,18 @@
 
 The `--agentnet --pipeline` command combines three checks on the original model:
 
-1. **Option to complete:** every reachable global marking can reach a global
-   final marking (`AG EF IsFinal`).
+1. **Completion always remains possible:** every reachable global marking can
+   still reach a global final marking (`AG EF IsFinal`). This includes states
+   reached after a previous final; it is not just a check from the initial state.
 2. **No per-type deadlocks:** no reachable state leaves an unfinished type
    permanently unable to participate. See [per-type deadlocks](deadlocks.md).
 3. **No dead source activities:** every original global activity can fire with
    at least one legal choice of variable weights.
 
-The verdict is computed from the existing results:
+The first condition is the global `completion["option_to_complete"]` result.
+It is defined as `AG (EF IsFinal)` in `_COMPLETION_PROPERTIES` in
+[tina.py](../petrinet/tina.py). `_prune_pipeline` in
+[__main__.py](../petrinet/__main__.py) requires that result in the verdict:
 
 ```python
 soundness = (
@@ -20,8 +24,31 @@ soundness = (
 ```
 
 The declared global finals are the completion contract. This is the project's
-agent-soundness definition. `AF IsFinal` remains a separate, stronger check for
-inevitable completion; it is not required for soundness.
+agent-soundness definition. A model with one successful execution can still be
+unsound if another choice reaches a state from which completion is impossible.
+For example, the airport model fails this condition when all passengers miss
+their flights and an aircraft can no longer open boarding.
+
+## Global and per-type completion
+
+The [per-type completion results](completion.md) report three separate properties:
+
+| JSON field | Formula | Meaning |
+|---|---|---|
+| `can_complete` | `EF LocalFinal` | Some execution from the initial state reaches the type's local final |
+| `option_to_complete` | `AG EF LocalFinal` | The type's local final remains reachable from every reachable global marking |
+| `all_traces_complete` | `AF LocalFinal` | Every execution from the initial state reaches the type's local final at least once |
+
+Soundness uses the **global** `AG EF IsFinal`, together with the deadlock and
+activity checks above. The per-type results are additional diagnostics; checking
+each local final separately does not establish that a whole global final is
+reachable.
+
+`AF IsFinal` is reported separately and is not required for soundness. A loop
+with an exit to a final can satisfy `AG EF` while failing `AF`. Conversely, an
+initially final marking satisfies `AF` immediately, even if a later transition
+leaves the final set permanently and makes `AG EF` false. Because finals do
+not stop firing, neither property implies the other in general.
 
 ## Source activities and generated variants
 
@@ -49,9 +76,23 @@ all dead standard-net transitions, but the source-activity verdict is retained
 even when all variants of an activity are removed. The pruned net is not
 rechecked to determine soundness.
 
+The CLI's `Dead converted transitions` list refers to individual generated
+transitions, including fixed activities with one variant. A dead variant alone
+does not imply an unsound agent model. A dead source activity does fail the
+activity requirement, even if global completion remains possible.
+
+For example, the airport has three passengers in total, so expansion creates
+`open[2]__k_Passenger_1`, `_2`, and `_3`. Flight 2 has only one passenger;
+`Waiting[2]` can never contain two or three tokens. Those larger choices are
+dead, but `open[2]` itself is live through its weight-1 variant. The airport has
+no dead source activities; its unsoundness comes from losing completion and
+reachable per-type deadlocks.
+
 ## Reports
 
-The terminal prints `Soundness: yes/no` and lists any dead source activities.
+The terminal prints `Soundness: yes/no` and lists any dead source activities,
+or explicitly says `No dead source activities.`. This is separate from its
+`Dead converted transitions` list.
 JSON contains `soundness` and `dead_activities`; each dead activity records its
 name, label, and participating local transitions. For example:
 

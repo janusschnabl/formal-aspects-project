@@ -42,6 +42,7 @@ _COMPLETION_PROPERTIES = {
 }
 _AGENT_COMPLETION_PROPERTIES = {
     "can_complete": "EF IsFinal",
+    "option_to_complete": _COMPLETION_PROPERTIES["option_to_complete"],
     "all_traces_complete": _COMPLETION_PROPERTIES["all_traces_complete"],
 }
 _DEADLOCK_PROPERTIES = {
@@ -290,7 +291,7 @@ def verify_properties(
 ) -> VerificationResults:
     """Check global and per-type properties on one global reachability graph.
 
-    Per-type completion uses EF and AF of the inferred local final predicate.
+    Per-type completion uses EF, AG EF, and AF of the inferred local final predicate.
     A type with no explicit final clauses has a None result.
     Per-type deadlocks are reachable unfinished states from which participation
     is permanently impossible. Missing local finals give no completion exemption.

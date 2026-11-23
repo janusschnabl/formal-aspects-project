@@ -97,7 +97,7 @@ class CliTests(unittest.TestCase):
                 mock.patch("petrinet.__main__.tina.verify_properties", return_value={
                     "completion": {"option_to_complete": True, "all_traces_complete": True},
                     "deadlocks": {"reachable": True, "non_final_reachable": False}, "properties": {},
-                    "agent_completion": {name: {"can_complete": True, "all_traces_complete": True}
+                    "agent_completion": {name: {"can_complete": True, "option_to_complete": True, "all_traces_complete": True}
                                          for name in ["Janus", "Thomas"]},
                     "agent_deadlocks": {"Janus": False, "Thomas": False},
                 }) as verification:
@@ -114,10 +114,14 @@ class CliTests(unittest.TestCase):
                               "Reachable deadlock: yes\nReachable non-final deadlock: no\n"
                               "Option to complete from every reachable marking: yes\n"
                               "All traces eventually reach a final marking: yes\n"
-                              "Agent Janus: can eventually complete: yes\nAgent Janus: always completes: yes\n"
-                              "Agent Thomas: can eventually complete: yes\nAgent Thomas: always completes: yes\n"
+                              "Agent Janus: can complete from initial marking: yes\n"
+                              "Agent Janus: option to complete from every reachable marking: yes\n"
+                              "Agent Janus: all traces reach a local final (initial marking counts): yes\n"
+                              "Agent Thomas: can complete from initial marking: yes\n"
+                              "Agent Thomas: option to complete from every reachable marking: yes\n"
+                              "Agent Thomas: all traces reach a local final (initial marking counts): yes\n"
                               "Agent Janus: reachable deadlock: no\nAgent Thomas: reachable deadlock: no\n"
-                              "Soundness: yes\n", ""))
+                              "Soundness: yes\nNo dead source activities.\n", ""))
             load.assert_called_once()
             convert.assert_called_once()
             check.assert_called_once()
@@ -375,10 +379,14 @@ class RealGraphvizTests(unittest.TestCase):
                               "Reachable deadlock: yes\nReachable non-final deadlock: no\n"
                               "Option to complete from every reachable marking: yes\n"
                               "All traces eventually reach a final marking: yes\n"
-                              "Agent Janus: can eventually complete: yes\nAgent Janus: always completes: yes\n"
-                              "Agent Thomas: can eventually complete: yes\nAgent Thomas: always completes: yes\n"
+                              "Agent Janus: can complete from initial marking: yes\n"
+                              "Agent Janus: option to complete from every reachable marking: yes\n"
+                              "Agent Janus: all traces reach a local final (initial marking counts): yes\n"
+                              "Agent Thomas: can complete from initial marking: yes\n"
+                              "Agent Thomas: option to complete from every reachable marking: yes\n"
+                              "Agent Thomas: all traces reach a local final (initial marking counts): yes\n"
                               "Agent Janus: reachable deadlock: no\nAgent Thomas: reachable deadlock: no\n"
-                              "Soundness: yes\n", ""))
+                              "Soundness: yes\nNo dead source activities.\n", ""))
             for suffix in [".svg", "-agent.svg"]:
                 self.assertEqual(ElementTree.parse(f"{prefix}{suffix}").getroot().tag,
                                  "{http://www.w3.org/2000/svg}svg")
